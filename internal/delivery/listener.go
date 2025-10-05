@@ -18,12 +18,11 @@ import (
 )
 
 type Listener struct {
-	CompraUC  *usecases.CompraUseCase
-	EstoqueUC *usecases.EstoqueUseCase
-	VendaUC   *usecases.VendaUseCase
-	StatusUC  *usecases.StatusUseCase
-	Cache     *cache.Cache
-	Workers   int // número de workers concorrentes
+	EstruturaMercadologica  *usecases.EstruturaMercadologicaUseCase
+	PromocaoUC              *usecases.PromocaoUseCase
+	Produtos                 *usecases.ProdutosUseCase
+	
+	Workers                 int // número de workers concorrentes
 }
 
 func (l *Listener) getConnectionWithWait(rabbitmqurl string) (*amqp.Connection, error) {
@@ -86,7 +85,7 @@ func (l *Listener) ListenToQueue(rabbitmqurl string) error {
 			continue
 		}
 
-		queue := "thothQueue"
+		queue := "integracaoCron"
 		msgs, err := ch.Consume(queue, "", false, false, false, false, nil)
 		if err != nil {
 			log.Printf("Erro consumindo mensagens: %v. Tentando reconectar...", err)
@@ -170,8 +169,8 @@ func (l *Listener) worker(id int, msgs <-chan amqp.Delivery, wg *sync.WaitGroup,
 	}()
 
 	log.Printf("Worker %d iniciado e aguardando mensagens...", id)
-	tracer := otel.Tracer("Workers")
-	ctx := context.Background()
+	
+	
 
 	messageCount := 0
 	idleTime := time.Now()
@@ -185,19 +184,15 @@ func (l *Listener) worker(id int, msgs <-chan amqp.Delivery, wg *sync.WaitGroup,
 		messageCount++
 		log.Printf("Worker %d processando mensagem #%d", id, messageCount)
 
-		if err, uuid := l.processMessage(msg); err != nil {
+		if err, _ := l.processMessage(msg); err != nil {
 			// Criar span para rastreamento de erro
-			ctxSpan, span := tracer.Start(ctx, "process-message-error")
+		
+
 			log.Printf("Worker %d - Erro processando mensagem #%d: %v", id, messageCount, err)
 
-			// Atualizar status de erro
-			if uuid != "" {
-				l.Cache.AtualizaStatusProcesso(ctxSpan, uuid, "erro")
-				l.StatusUC.UpdateStatusProcesso(ctxSpan, uuid, "erro")
-			}
+		
 
-			span.RecordError(err)
-			span.End()
+		
 		} else {
 			log.Printf("Worker %d - Mensagem #%d processada com sucesso", id, messageCount)
 		}
@@ -228,17 +223,13 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 		return fmt.Errorf("erro ao fazer parse da mensagem: %w", err), ""
 	}
 
-	processa, ok := message["processa"].(string)
+	tipoIntegracao, ok := message["tipoIntegracao"].(string)
 	if !ok {
-		log.Printf("Campo 'processa' inválido ou ausente na mensagem")
-		return fmt.Errorf("campo 'processa' inválido ou ausente"), ""
+		log.Printf("Campo 'tipoIntegracao' inválido ou ausente na mensagem")
+		return fmt.Errorf("campo 'tipoIntegracao' inválido ou ausente"), ""
 	}
 
-	uuid, ok := message["processo"].(string)
-	if !ok {
-		log.Printf("Campo 'processo' inválido ou ausente na mensagem")
-		return fmt.Errorf("campo 'processo' inválido ou ausente"), ""
-	}
+	
 
 	dados, ok := message["dados"].(map[string]interface{})
 	if !ok {
@@ -246,44 +237,33 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 		return fmt.Errorf("campo 'dados' inválido ou ausente"), uuid
 	}
 
-	log.Printf("Processando mensagem do tipo '%s' com UUID: %s", processa, uuid)
-	ctx := context.WithValue(context.Background(), "uuid", uuid)
-
+	
 	var err error
 
-	switch processa {
-	case "compra":
-		log.Printf("Iniciando processamento de compra para UUID: %s", uuid)
-		_, err = l.CompraUC.ProcessarCompra(ctx, dados)
-		log.Printf("Processamento de compra concluído para UUID: %s", uuid)
-	case "venda":
-		log.Printf("Iniciando processamento de venda para UUID: %s", uuid)
-		err = l.VendaUC.ProcessarVenda(ctx, dados)
-		log.Printf("Processamento de venda concluído para UUID: %s", uuid)
-	case "estoque":
-		log.Printf("Iniciando processamento de estoque para UUID: %s", uuid)
-		err = l.EstoqueUC.ProcessarEstoque(ctx, dados)
-		log.Printf("Processamento de estoque concluído para UUID: %s", uuid)
+	switch tipoIntegracao {
+	case "EstruturaMercadologica":
+		log.Printf("Iniciando processamento de Estrutura mercadológica: %s")
+		_, err = l.EstruturaMercadologica.ProcessarEstrutura( dados)
+		log.Printf("Processamento de estrutura mercadológica concluído para UUID: %s")
+	case "Promocao":
+		log.Printf("Iniciando processamento de promoção: %s")
+		err = l.PromocaoUC.ProcessarPromocao( dados)
+		log.Printf("Processamento de promoção concluído: %s")
+	case "Produtos":
+		log.Printf("Iniciando processamento de produtos: %s")
+		err = l.EstoqueUC.ProcessarProdutos( dados)
+		log.Printf("Processamento de produtos concluído: %s")
 	default:
-		log.Printf("Tipo de processo desconhecido: %s para UUID: %s", processa, uuid)
-		return fmt.Errorf("tipo de processo desconhecido: %s", processa), uuid
+		log.Printf("Tipo de processo desconhecido: %s", tipoIntegracao)
+		return fmt.Errorf("tipo de processo desconhecido: %s", tipoIntegracao), ""
 	}
 
 	if err != nil {
-		log.Printf("Erro processando mensagem do tipo '%s' com UUID '%s': %v", processa, uuid, err)
-		l.Cache.AtualizaStatusProcesso(context.Background(), uuid, "erro")
-		l.StatusUC.UpdateStatusProcesso(context.Background(), uuid, "erro")
-		return err, uuid
+		log.Printf("Erro processando mensagem do tipo '%s' com UUID '%s': %v", tipoIntegracao, uuid, err)
+		
+		return err
 	}
 
-	log.Printf("Mensagem do tipo '%s' processada com sucesso para UUID: %s", processa, uuid)
-	if updErr := l.Cache.AtualizaStatusProcesso(context.Background(), uuid, "Sucesso"); updErr != nil {
-		log.Printf("Erro ao atualizar status do processo no Redis para UUID '%s': %v", uuid, updErr)
-	}
-
-	if updErr := l.StatusUC.UpdateStatusProcesso(context.Background(), uuid, "Sucesso"); updErr != nil {
-		log.Printf("Erro ao atualizar status do processo no banco de dados para UUID '%s': %v", uuid, updErr)
-	}
-	log.Printf("Status do processo atualizado com sucesso para UUID: %s", uuid)
-	return nil, uuid
+	
+	return nil,
 }
