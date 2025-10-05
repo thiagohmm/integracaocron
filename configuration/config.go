@@ -1,5 +1,4 @@
 package configuration
-package configuration
 
 import (
 	"fmt"
@@ -23,7 +22,6 @@ type Conf struct {
 	ENV_REDIS_ADDR     string `mapstructure:"ENV_REDIS_ADDRESS"`
 	ENV_REDIS_PASSWORD string `mapstructure:"ENV_REDIS_PASSWORD"`
 	ENV_REDIS_EXPIRE   int    `mapstructure:"ENV_REDIS_EXPIRE"`
-	
 }
 
 type Dados struct {
@@ -75,7 +73,7 @@ func LoadConfig(path string) (*Conf, error) {
 		cfg.DBSchema = viper.GetString("DB_SCHEMA")
 		cfg.DBConnect = viper.GetString("DB_CONNECTSTRING")
 		cfg.ENV_RABBITMQ = viper.GetString("ENV_RABBITMQ")
-		
+
 		cfg.ENV_REDIS_ADDR = viper.GetString("ENV_REDIS_ADDRESS")
 		cfg.ENV_REDIS_PASSWORD = viper.GetString("ENV_REDIS_PASSWORD")
 		cfg.ENV_REDIS_EXPIRE = viper.GetInt("ENV_REDIS_EXPIRE")

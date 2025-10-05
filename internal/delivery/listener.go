@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/streadway/amqp"
-	"github.com/thiagohmm/integracaoThothConsumer/internal/infraestructure/cache"
-	infraestructure "github.com/thiagohmm/integracaoThothConsumer/internal/infraestructure/rabbitmq"
-	"github.com/thiagohmm/integracaoThothConsumer/internal/usecases"
+	"github.com/thiagohmm/integracaocron/internal/infraestructure/cache"
+	infraestructure "github.com/thiagohmm/integracaocron/internal/infraestructure/rabbitmq"
+	"github.com/thiagohmm/integracaocron/internal/usecases"
 	"go.opentelemetry.io/otel"
 )
 
