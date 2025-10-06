@@ -1,7 +1,6 @@
 package rabbitmq
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -11,18 +10,18 @@ import (
 	"time"
 
 	"github.com/streadway/amqp"
-	"github.com/thiagohmm/integracaocron/internal/infraestructure/cache"
-	infraestructure "github.com/thiagohmm/integracaocron/internal/infraestructure/rabbitmq"
-	"github.com/thiagohmm/integracaocron/internal/usecases"
-	"go.opentelemetry.io/otel"
+	"github.com/thiagohmm/integracaocron/domain/entities"
+	"github.com/thiagohmm/integracaocron/domain/usecases"
+	infraestructure "github.com/thiagohmm/integracaocron/infraestructure/rabbitmq"
 )
 
 type Listener struct {
-	EstruturaMercadologica  *usecases.EstruturaMercadologicaUseCase
-	PromocaoUC              *usecases.PromocaoUseCase
-	Produtos                 *usecases.ProdutosUseCase
-	
-	Workers                 int // número de workers concorrentes
+	PromocaoUC *usecases.PromotionUseCase
+
+	//EstruturaMercadologica *usecases.EstruturaMercadologicaUseCase --- IGNORE ---
+	//Produtos               *usecases.ProdutosUseCase --- IGNORE ---
+
+	Workers int // número de workers concorrentes
 }
 
 func (l *Listener) getConnectionWithWait(rabbitmqurl string) (*amqp.Connection, error) {
@@ -169,8 +168,6 @@ func (l *Listener) worker(id int, msgs <-chan amqp.Delivery, wg *sync.WaitGroup,
 	}()
 
 	log.Printf("Worker %d iniciado e aguardando mensagens...", id)
-	
-	
 
 	messageCount := 0
 	idleTime := time.Now()
@@ -186,13 +183,9 @@ func (l *Listener) worker(id int, msgs <-chan amqp.Delivery, wg *sync.WaitGroup,
 
 		if err, _ := l.processMessage(msg); err != nil {
 			// Criar span para rastreamento de erro
-		
 
 			log.Printf("Worker %d - Erro processando mensagem #%d: %v", id, messageCount, err)
 
-		
-
-		
 		} else {
 			log.Printf("Worker %d - Mensagem #%d processada com sucesso", id, messageCount)
 		}
@@ -229,41 +222,41 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 		return fmt.Errorf("campo 'tipoIntegracao' inválido ou ausente"), ""
 	}
 
-	
-
 	dados, ok := message["dados"].(map[string]interface{})
 	if !ok {
-		log.Printf("Campo 'dados' inválido ou ausente na mensagem para UUID: %s", uuid)
-		return fmt.Errorf("campo 'dados' inválido ou ausente"), uuid
+		log.Printf("Campo 'dados' inválido ou ausente na mensagem para UUID: %s")
+		return fmt.Errorf("campo 'dados' inválido ou ausente"), ""
 	}
 
-	
 	var err error
 
 	switch tipoIntegracao {
-	case "EstruturaMercadologica":
-		log.Printf("Iniciando processamento de Estrutura mercadológica: %s")
-		_, err = l.EstruturaMercadologica.ProcessarEstrutura( dados)
-		log.Printf("Processamento de estrutura mercadológica concluído para UUID: %s")
+
 	case "Promocao":
 		log.Printf("Iniciando processamento de promoção: %s")
-		err = l.PromocaoUC.ProcessarPromocao( dados)
+		var promocao entities.Promotion
+		promocaoBytes, err := json.Marshal(dados)
+		if err != nil {
+			log.Printf("Erro ao serializar dados de promoção: %v", err)
+			return fmt.Errorf("erro ao serializar dados de promoção: %w", err), ""
+		}
+		if err := json.Unmarshal(promocaoBytes, &promocao); err != nil {
+			log.Printf("Erro ao desserializar dados para entities.Promotion: %v", err)
+			return fmt.Errorf("erro ao desserializar dados para entities.Promotion: %w", err), ""
+		}
+		err = l.PromocaoUC.ProcessarPromocao(promocao)
 		log.Printf("Processamento de promoção concluído: %s")
-	case "Produtos":
-		log.Printf("Iniciando processamento de produtos: %s")
-		err = l.EstoqueUC.ProcessarProdutos( dados)
-		log.Printf("Processamento de produtos concluído: %s")
+
 	default:
 		log.Printf("Tipo de processo desconhecido: %s", tipoIntegracao)
 		return fmt.Errorf("tipo de processo desconhecido: %s", tipoIntegracao), ""
 	}
 
 	if err != nil {
-		log.Printf("Erro processando mensagem do tipo '%s' com UUID '%s': %v", tipoIntegracao, uuid, err)
-		
-		return err
+		log.Printf("Erro processando mensagem do tipo '%s': %v", tipoIntegracao, err)
+
+		return err, ""
 	}
 
-	
-	return nil,
+	return nil, ""
 }

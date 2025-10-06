@@ -1,0 +1,66 @@
+version: '3.8'
+
+services:
+  integracaocron:
+    build: .
+    container_name: integracaocron
+    restart: unless-stopped
+    environment:
+      # Database Configuration
+      - DB_DIALECT=oracle
+      - DB_USER=${DB_USER}
+      - DB_PASSWD=${DB_PASSWD}
+      - DB_SCHEMA=${DB_SCHEMA}
+      - DB_CONNECTSTRING=${DB_CONNECTSTRING}
+      
+      # RabbitMQ Configuration
+      - ENV_RABBITMQ=${ENV_RABBITMQ}
+      
+      # Redis Configuration (if needed)
+      - ENV_REDIS_ADDRESS=${ENV_REDIS_ADDRESS}
+      - ENV_REDIS_PASSWORD=${ENV_REDIS_PASSWORD}
+      - ENV_REDIS_EXPIRE=${ENV_REDIS_EXPIRE}
+      
+      # Application Configuration
+      - WORKERS=${WORKERS:-20}
+    volumes:
+      - ./logs:/app/logs
+    depends_on:
+      - rabbitmq
+    networks:
+      - integracaocron-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # RabbitMQ service for development (optional)
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: integracaocron-rabbitmq
+    restart: unless-stopped
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin
+      - RABBITMQ_DEFAULT_PASS=admin123
+      - RABBITMQ_DEFAULT_VHOST=/
+    ports:
+      - "5672:5672"   # AMQP port
+      - "15672:15672" # Management UI
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+      - ./rabbitmq/config:/etc/rabbitmq
+    networks:
+      - integracaocron-network
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 30s
+      timeout: 30s
+      retries: 3
+
+volumes:
+  rabbitmq_data:
+
+networks:
+  integracaocron-network:
+    driver: bridge

@@ -7,7 +7,7 @@ import (
 	"log"
 	"time"
 
-	config "github.com/thiagohmm/integracaoThothConsumer/configuration"
+	config "github.com/thiagohmm/integracaocron/configuration"
 
 	go_ora "github.com/sijms/go-ora/v2"
 )
