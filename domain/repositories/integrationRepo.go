@@ -27,19 +27,21 @@ func (r *IntegrationRepositoryImpl) RemoveIntegrationCombo(dataCorte time.Time, 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var query string
-	if len(expurgo) > 0 && expurgo[0] == "SIM" {
-		query = `DELETE FROM INTEGR_COMBO WHERE DATA_INTEGRACAO < :1`
-	} else {
-		query = `UPDATE INTEGR_COMBO SET STATUS_PROCESSAMENTO = 'REMOVIDO' WHERE DATA_INTEGRACAO < :1`
+	// Set default value for expurgo if not provided
+	fazExpurgo := "NAO"
+	if len(expurgo) > 0 {
+		fazExpurgo = expurgo[0]
 	}
 
-	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	query := `BEGIN sp_limparintegracaocombocorte(:1, :2); END;`
+
+	_, err := r.db.ExecContext(ctx, query, dataCorte, fazExpurgo)
 	if err != nil {
-		log.Printf("Erro ao remover integração combo: %v", err)
+		log.Printf("Erro ao executar sp_limparintegracaocombocorte: %v", err)
 		return fmt.Errorf("erro ao remover integração combo: %w", err)
 	}
 
+	log.Printf("Integração combo removida com sucesso para data corte: %v, expurgo: %s", dataCorte, fazExpurgo)
 	return nil
 }
 
@@ -123,34 +125,84 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoPromocao(dataCorte
 	return nil
 }
 
-// Data movement methods (stubs - implement based on your specific needs)
+// Data movement methods
 func (r *IntegrationRepositoryImpl) MoveIntegrationMarketingStructure(dataCorte time.Time) error {
-	// TODO: Implement based on your business logic
-	log.Printf("MoveIntegrationMarketingStructure called with dataCorte: %v", dataCorte)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := `BEGIN sp_MoverStagingEstruturaMercadologica(:1); END;`
+
+	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	if err != nil {
+		log.Printf("Erro ao executar sp_MoverStagingEstruturaMercadologica: %v", err)
+		return fmt.Errorf("erro ao mover estrutura mercadológica para staging: %w", err)
+	}
+
+	log.Printf("Estrutura mercadológica movida para staging com sucesso para data: %v", dataCorte)
 	return nil
 }
 
 func (r *IntegrationRepositoryImpl) MoveIntegrationProductStaging(dataCorte time.Time) error {
-	// TODO: Implement based on your business logic
-	log.Printf("MoveIntegrationProductStaging called with dataCorte: %v", dataCorte)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := `BEGIN sp_MoverStagingProduto(:1); END;`
+
+	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	if err != nil {
+		log.Printf("Erro ao executar sp_MoverStagingProduto: %v", err)
+		return fmt.Errorf("erro ao mover produto para staging: %w", err)
+	}
+
+	log.Printf("Produto movido para staging com sucesso para data: %v", dataCorte)
 	return nil
 }
 
 func (r *IntegrationRepositoryImpl) MoveIntegrationPackagingStaging(dataCorte time.Time) error {
-	// TODO: Implement based on your business logic
-	log.Printf("MoveIntegrationPackagingStaging called with dataCorte: %v", dataCorte)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := `BEGIN sp_MoverStagingEmbalagem(:1); END;`
+
+	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	if err != nil {
+		log.Printf("Erro ao executar sp_MoverStagingEmbalagem: %v", err)
+		return fmt.Errorf("erro ao mover embalagem para staging: %w", err)
+	}
+
+	log.Printf("Embalagem movida para staging com sucesso para data: %v", dataCorte)
 	return nil
 }
 
 func (r *IntegrationRepositoryImpl) MoveIntegrationComboStaging(dataCorte time.Time) error {
-	// TODO: Implement based on your business logic
-	log.Printf("MoveIntegrationComboStaging called with dataCorte: %v", dataCorte)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := `BEGIN sp_MoverStagingCombo(:1); END;`
+
+	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	if err != nil {
+		log.Printf("Erro ao executar sp_MoverStagingCombo: %v", err)
+		return fmt.Errorf("erro ao mover combo para staging: %w", err)
+	}
+
+	log.Printf("Combo movido para staging com sucesso para data: %v", dataCorte)
 	return nil
 }
 
 func (r *IntegrationRepositoryImpl) MoveIntegrationPromotionStaging(dataCorte time.Time) error {
-	// TODO: Implement based on your business logic
-	log.Printf("MoveIntegrationPromotionStaging called with dataCorte: %v", dataCorte)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := `BEGIN sp_MoverStagingPromocao(:1); END;`
+
+	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	if err != nil {
+		log.Printf("Erro ao executar sp_MoverStagingPromocao: %v", err)
+		return fmt.Errorf("erro ao mover promoção para staging: %w", err)
+	}
+
+	log.Printf("Promoção movida para staging com sucesso para data: %v", dataCorte)
 	return nil
 }
 
@@ -159,7 +211,10 @@ func (r *IntegrationRepositoryImpl) GetIntegrationUpdateComboByDate(dataCorte ti
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `SELECT ID_INTEGRACAO_COMBO, DATA_INTEGRACAO FROM INTEGR_COMBO WHERE DATA_INTEGRACAO < :1`
+	query := `
+		SELECT ID_INTEGRACAO_COMBO, ID_REVENDEDOR, ID_COMBO_PROMOCAO, 
+			   ENVIANDO, JSON, DATA_ATUALIZACAO, TRANSACAO, DATA_INICIO_ENVIO
+		FROM INTEGR_COMBO WHERE DATA_ATUALIZACAO < :1`
 
 	rows, err := r.db.QueryContext(ctx, query, dataCorte)
 	if err != nil {
@@ -171,7 +226,16 @@ func (r *IntegrationRepositoryImpl) GetIntegrationUpdateComboByDate(dataCorte ti
 	var combos []entities.IntegrationCombo
 	for rows.Next() {
 		var combo entities.IntegrationCombo
-		err := rows.Scan(&combo.IdIntegracaoCombo, &combo.DataIntegracao)
+		err := rows.Scan(
+			&combo.IdIntegracaoCombo,
+			&combo.IdRevendedor,
+			&combo.IdComboPromocao,
+			&combo.Enviando,
+			&combo.Json,
+			&combo.DataAtualizacao,
+			&combo.Transacao,
+			&combo.DataInicioEnvio,
+		)
 		if err != nil {
 			log.Printf("Erro ao escanear combo: %v", err)
 			continue
@@ -201,13 +265,14 @@ func (r *IntegrationRepositoryImpl) UpdateExpiredSlaSolicitation() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `UPDATE SOLICITACOES SET STATUS = 'EXPIRADO' WHERE SLA_EXPIRACAO < SYSDATE AND STATUS = 'ATIVO'`
+	query := `BEGIN sp_AtualizarVencimentoSlaSolicitacoes(); END;`
 
 	_, err := r.db.ExecContext(ctx, query)
 	if err != nil {
-		log.Printf("Erro ao atualizar solicitações expiradas: %v", err)
-		return fmt.Errorf("erro ao atualizar solicitações expiradas: %w", err)
+		log.Printf("Erro ao executar sp_AtualizarVencimentoSlaSolicitacoes: %v", err)
+		return fmt.Errorf("erro ao atualizar vencimento SLA solicitações: %w", err)
 	}
 
+	log.Printf("Vencimento SLA das solicitações atualizado com sucesso")
 	return nil
 }
