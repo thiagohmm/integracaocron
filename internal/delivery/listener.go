@@ -16,7 +16,10 @@ import (
 )
 
 type Listener struct {
-	PromocaoUC *usecases.PromotionUseCase
+	PromocaoUC               *usecases.PromotionUseCase
+	IntegrationUc            *usecases.IntegrationJobUseCase
+	ProductIntegrationUC     *usecases.ProductIntegrationUseCase
+	PromotionNormalizationUC *usecases.PromotionNormalizationUseCase
 
 	//EstruturaMercadologica *usecases.EstruturaMercadologicaUseCase --- IGNORE ---
 	//Produtos               *usecases.ProdutosUseCase --- IGNORE ---
@@ -116,13 +119,11 @@ func (l *Listener) ListenToQueue(rabbitmqurl string) error {
 		conn.NotifyClose(connClosed)
 
 		// Aguardar até que a conexão seja fechada
-		select {
-		case err := <-connClosed:
-			if err != nil {
-				log.Printf("Conexão RabbitMQ fechada com erro: %v. Reiniciando workers...", err)
-			} else {
-				log.Printf("Conexão RabbitMQ fechada normalmente. Reiniciando workers...")
-			}
+		closeErr := <-connClosed
+		if closeErr != nil {
+			log.Printf("Conexão RabbitMQ fechada com erro: %v. Reiniciando workers...", closeErr)
+		} else {
+			log.Printf("Conexão RabbitMQ fechada normalmente. Reiniciando workers...")
 		}
 
 		// Sinalizar para os workers pararem
@@ -142,9 +143,6 @@ func (l *Listener) ListenToQueue(rabbitmqurl string) error {
 		// Pequena pausa antes de tentar reconectar
 		time.Sleep(5 * time.Second)
 	}
-
-	// Este ponto nunca deve ser alcançado
-	return nil
 }
 
 func restartApplication() {
@@ -216,24 +214,45 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 		return fmt.Errorf("erro ao fazer parse da mensagem: %w", err), ""
 	}
 
-	tipoIntegracao, ok := message["tipoIntegracao"].(string)
-	if !ok {
-		log.Printf("Campo 'tipoIntegracao' inválido ou ausente na mensagem")
-		return fmt.Errorf("campo 'tipoIntegracao' inválido ou ausente"), ""
+	// Suporta tanto "tipoIntegracao" (formato antigo) quanto "type_message" ou string direta
+	var tipoIntegracao string
+	var dados map[string]interface{}
+
+	// Verifica se é o formato novo com "type_message"
+	if typeMsg, ok := message["type_message"].(string); ok {
+		tipoIntegracao = typeMsg
+		// Dados podem estar em "dados" ou a mensagem inteira pode ser os dados
+		if d, ok := message["dados"].(map[string]interface{}); ok {
+			dados = d
+		} else {
+			dados = message
+		}
+	} else if tipoInt, ok := message["tipoIntegracao"].(string); ok {
+		// Formato antigo com "tipoIntegracao"
+		tipoIntegracao = tipoInt
+		if d, ok := message["dados"].(map[string]interface{}); ok {
+			dados = d
+		} else {
+			dados = message
+		}
+	} else {
+		// Tenta ler diretamente se a mensagem for apenas uma string
+		var simpleMessage string
+		if err := json.Unmarshal(msg.Body, &simpleMessage); err == nil {
+			tipoIntegracao = simpleMessage
+			dados = make(map[string]interface{})
+		} else {
+			log.Printf("Campo 'type_message' ou 'tipoIntegracao' inválido ou ausente na mensagem")
+			return fmt.Errorf("campo 'type_message' ou 'tipoIntegracao' inválido ou ausente"), ""
+		}
 	}
 
-	dados, ok := message["dados"].(map[string]interface{})
-	if !ok {
-		log.Printf("Campo 'dados' inválido ou ausente na mensagem para UUID: %s")
-		return fmt.Errorf("campo 'dados' inválido ou ausente"), ""
-	}
-
-	var err error
+	log.Printf("Tipo de integração detectado: %s", tipoIntegracao)
 
 	switch tipoIntegracao {
 
-	case "Promocao":
-		log.Printf("Iniciando processamento de promoção: %s")
+	case "promocao", "Promocao":
+		log.Printf("Iniciando processamento de promoção")
 		var promocao entities.Promotion
 		promocaoBytes, err := json.Marshal(dados)
 		if err != nil {
@@ -245,17 +264,64 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 			return fmt.Errorf("erro ao desserializar dados para entities.Promotion: %w", err), ""
 		}
 		err = l.PromocaoUC.ProcessarPromocao(promocao)
-		log.Printf("Processamento de promoção concluído: %s")
+		if err != nil {
+			log.Printf("Erro ao processar promoção: %v", err)
+			return fmt.Errorf("erro ao processar promoção: %w", err), ""
+		}
+		err = l.IntegrationUc.IntegrationJob()
+		if err != nil {
+			log.Printf("Erro ao processar integração: %v", err)
+			return fmt.Errorf("erro ao processar integração: %w", err), ""
+		}
+
+		log.Printf("Processamento de promoção concluído")
+
+	case "produto", "Produto":
+		log.Printf("Iniciando processamento de produto")
+
+		if l.ProductIntegrationUC == nil {
+			log.Printf("ProductIntegrationUC não foi inicializado")
+			return fmt.Errorf("ProductIntegrationUC não foi inicializado"), ""
+		}
+
+		success, err := l.ProductIntegrationUC.ImportProductIntegration()
+		if err != nil {
+			log.Printf("Erro ao processar integração de produtos: %v", err)
+			return fmt.Errorf("erro ao processar integração de produtos: %w", err), ""
+		}
+
+		if !success {
+			log.Printf("Integração de produtos concluída com alguns erros")
+			return fmt.Errorf("integração de produtos concluída com alguns erros"), ""
+		}
+
+		log.Printf("Processamento de produto concluído com sucesso")
+
+	case "promocao_normalizacao", "PromocaoNormalizacao":
+		log.Printf("Iniciando normalização de promoções")
+
+		if l.PromotionNormalizationUC == nil {
+			log.Printf("PromotionNormalizationUC não foi inicializado")
+			return fmt.Errorf("PromotionNormalizationUC não foi inicializado"), ""
+		}
+
+		result, err := l.PromotionNormalizationUC.NormalizePromotions()
+		if err != nil {
+			log.Printf("Erro ao processar normalização de promoções: %v", err)
+			return fmt.Errorf("erro ao processar normalização de promoções: %w", err), ""
+		}
+
+		if !result.Success {
+			log.Printf("Normalização de promoções concluída com alguns erros: %s", result.Message)
+			return fmt.Errorf("normalização de promoções concluída com alguns erros: %s", result.Message), ""
+		}
+
+		log.Printf("Normalização de promoções concluída com sucesso. Processados: %d, Atualizados: %d, Duplicatas removidas: %d",
+			result.ProcessedCount, result.UpdatedCount, result.TotalRemovedDuplicates)
 
 	default:
 		log.Printf("Tipo de processo desconhecido: %s", tipoIntegracao)
 		return fmt.Errorf("tipo de processo desconhecido: %s", tipoIntegracao), ""
-	}
-
-	if err != nil {
-		log.Printf("Erro processando mensagem do tipo '%s': %v", tipoIntegracao, err)
-
-		return err, ""
 	}
 
 	return nil, ""
