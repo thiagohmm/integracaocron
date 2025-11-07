@@ -39,6 +39,8 @@ func main() {
 	parameterRepo := repositories.NewParameterRepository(db)
 	integrationRepo := repositories.NewIntegrationRepository(db)
 	networkRepo := repositories.NewNetworkRepository(db)
+	productIntegrationRepo := repositories.NewProductIntegrationRepository(db)
+	promotionNormalizationRepo := repositories.NewPromotionNormalizationRepository(db)
 
 	// Get RabbitMQ configuration
 	rabbitmqURL := getRabbitMQURL(cfg)
@@ -49,14 +51,19 @@ func main() {
 	// Initialize use cases
 	integrationJobUC := usecases.NewIntegrationJobUseCase(parameterRepo, integrationRepo, networkRepo, db)
 	promotionUC := usecases.NewPromotionUseCase(promotionRepo, rabbitmqURL, integrationJobUC)
+	productIntegrationUC := usecases.NewProductIntegrationUseCase(productIntegrationRepo, db)
+	promotionNormalizationUC := usecases.NewPromotionNormalizationUseCase(promotionNormalizationRepo, db)
 
 	// Get number of workers from environment or use default
 	workers := getWorkersCount()
 
 	// Initialize RabbitMQ listener
 	listener := &rabbitmq.Listener{
-		PromocaoUC: promotionUC,
-		Workers:    workers,
+		PromocaoUC:               promotionUC,
+		IntegrationUc:            integrationJobUC,
+		ProductIntegrationUC:     productIntegrationUC,
+		PromotionNormalizationUC: promotionNormalizationUC,
+		Workers:                  workers,
 	}
 
 	// Setup graceful shutdown

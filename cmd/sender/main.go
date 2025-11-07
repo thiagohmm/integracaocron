@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	var messageType = flag.String("type", "promocao", "Type of message: promocao, produto, produto_integracao, promocao_normalizacao")
+	var messageType = flag.String("type", "promocao", "Type of message: promocao, produto, produto_integracao, promocao_normalizacao, mover")
 	var message = flag.String("msg", "", "Custom message content (JSON)")
 	flag.Parse()
 
@@ -86,6 +86,8 @@ func main() {
 			}
 			msgBytes, _ := json.Marshal(sampleMessage)
 			messageBody = string(msgBytes)
+		case "mover", "productNetworkMain", "product_network_main":
+			messageBody = "mover"
 		default:
 			log.Fatalf("Unknown message type: %s", *messageType)
 		}

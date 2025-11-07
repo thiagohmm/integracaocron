@@ -362,12 +362,24 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 		log.Printf("Normalização de promoções concluída com sucesso. Processados: %d, Atualizados: %d, Duplicatas removidas: %d",
 			result.ProcessedCount, result.UpdatedCount, result.TotalRemovedDuplicates)
 
-	case "mover":
-		log.Printf("Iniciando processo de mover dados")
+	case "mover", "productNetworkMain", "product_network_main":
+		log.Printf("Iniciando processo ProductNetworkMain")
 
-		// Implementar a lógica de mover dados aqui
-		// Por enquanto, apenas um log de exemplo
-		log.Printf("Processo de mover dados concluído com sucesso")
+		if l.IntegrationUc == nil {
+			log.Printf("IntegrationUc não foi inicializado")
+			return fmt.Errorf("IntegrationUc não foi inicializado"), ""
+		}
+
+		// Usar time.Now() como dataCorte
+		dataCorte := time.Now()
+
+		err := l.productNetworkMain(dataCorte)
+		if err != nil {
+			log.Printf("Erro ao executar ProductNetworkMain: %v", err)
+			return fmt.Errorf("erro ao executar ProductNetworkMain: %w", err), ""
+		}
+
+		log.Printf("Processo ProductNetworkMain concluído com sucesso")
 
 	default:
 		log.Printf("Tipo de processo desconhecido: %s", tipoIntegracao)
@@ -375,4 +387,52 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 	}
 
 	return nil, ""
+}
+
+// productNetworkMain executa o job principal de integração de produtos e rede
+// Baseado na função TypeScript productNetworkMain
+func (l *Listener) productNetworkMain(dataCorte time.Time) error {
+	log.Printf("Job Integração - Início")
+
+	// Executar integração principal
+	if err := l.IntegrationUc.IntegrationJob(); err != nil {
+		log.Printf("Erro ao executar integração: %v", err)
+		return fmt.Errorf("erro ao executar integração: %w", err)
+	}
+
+	// Executar job de replicação de produtos de rede
+	if err := l.replicateNetworkProductsJob(); err != nil {
+		log.Printf("Erro ao replicar produtos de rede: %v", err)
+		return fmt.Errorf("erro ao replicar produtos de rede: %w", err)
+	}
+
+	// Mover dados usando o dataCorte fornecido
+	if err := l.IntegrationUc.MoveDataJob(dataCorte); err != nil {
+		log.Printf("Erro ao mover dados: %v", err)
+		return fmt.Errorf("erro ao mover dados: %w", err)
+	}
+
+	// Atualizar solicitações SLA expiradas
+	if err := l.IntegrationUc.UpdateExpirationSlaRequestsJob(); err != nil {
+		log.Printf("Erro ao atualizar solicitações SLA expiradas: %v", err)
+		return fmt.Errorf("erro ao atualizar solicitações SLA expiradas: %w", err)
+	}
+
+	log.Printf("Job Integração - Término")
+	return nil
+}
+
+// replicateNetworkProductsJob replica produtos para as redes
+// Baseado na função TypeScript replicateNetworkProductsJob
+func (l *Listener) replicateNetworkProductsJob() error {
+	log.Printf("Replicar produtos redes - Início.")
+
+	// Por enquanto, apenas um log pois precisaríamos implementar:
+	// - NetworkQuery para buscar redes
+	// - DealerNetworkQuery para buscar lojas
+	// - Lógica de replicação de produtos
+	// Esta implementação pode ser expandida conforme necessário
+
+	log.Printf("Replicar produtos redes - Fim.")
+	return nil
 }
