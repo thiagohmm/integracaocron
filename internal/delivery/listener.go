@@ -88,6 +88,26 @@ func (l *Listener) ListenToQueue(rabbitmqurl string) error {
 		}
 
 		queue := "integracaoCron"
+
+		// Declare queue to ensure it exists
+		_, err = ch.QueueDeclare(
+			queue, // name
+			true,  // durable
+			false, // delete when unused
+			false, // exclusive
+			false, // no-wait
+			nil,   // arguments
+		)
+		if err != nil {
+			log.Printf("Erro declarando fila %s: %v. Tentando reconectar...", queue, err)
+			ch.Close()
+			conn.Close()
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		log.Printf("Fila '%s' declarada com sucesso", queue)
+
 		msgs, err := ch.Consume(queue, "", false, false, false, false, nil)
 		if err != nil {
 			log.Printf("Erro consumindo mensagens: %v. Tentando reconectar...", err)
@@ -207,43 +227,61 @@ func (l *Listener) worker(id int, msgs <-chan amqp.Delivery, wg *sync.WaitGroup,
 
 func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 	log.Printf("Iniciando processamento de mensagem...")
+	log.Printf("Mensagem recebida (raw): %s", string(msg.Body))
 
-	var message map[string]interface{}
-	if err := json.Unmarshal(msg.Body, &message); err != nil {
-		log.Printf("Erro ao fazer parse da mensagem: %v", err)
-		return fmt.Errorf("erro ao fazer parse da mensagem: %w", err), ""
-	}
-
-	// Suporta tanto "tipoIntegracao" (formato antigo) quanto "type_message" ou string direta
 	var tipoIntegracao string
 	var dados map[string]interface{}
 
-	// Verifica se é o formato novo com "type_message"
-	if typeMsg, ok := message["type_message"].(string); ok {
-		tipoIntegracao = typeMsg
-		// Dados podem estar em "dados" ou a mensagem inteira pode ser os dados
-		if d, ok := message["dados"].(map[string]interface{}); ok {
-			dados = d
+	// Primeiro, tenta fazer parse como JSON object
+	var message map[string]interface{}
+	if err := json.Unmarshal(msg.Body, &message); err == nil {
+		// É um JSON object válido
+		log.Printf("Mensagem parseada como JSON object")
+
+		// Verifica se é o formato novo com "type_message"
+		if typeMsg, ok := message["type_message"].(string); ok {
+			tipoIntegracao = typeMsg
+			// Dados podem estar em "dados" ou a mensagem inteira pode ser os dados
+			if d, ok := message["dados"].(map[string]interface{}); ok {
+				dados = d
+			} else {
+				dados = message
+			}
+		} else if tipoInt, ok := message["tipoIntegracao"].(string); ok {
+			// Formato antigo com "tipoIntegracao"
+			tipoIntegracao = tipoInt
+			if d, ok := message["dados"].(map[string]interface{}); ok {
+				dados = d
+			} else {
+				dados = message
+			}
 		} else {
-			dados = message
-		}
-	} else if tipoInt, ok := message["tipoIntegracao"].(string); ok {
-		// Formato antigo com "tipoIntegracao"
-		tipoIntegracao = tipoInt
-		if d, ok := message["dados"].(map[string]interface{}); ok {
-			dados = d
-		} else {
-			dados = message
+			log.Printf("Campo 'type_message' ou 'tipoIntegracao' não encontrado no JSON object")
+			return fmt.Errorf("campo 'type_message' ou 'tipoIntegracao' não encontrado no JSON object"), ""
 		}
 	} else {
-		// Tenta ler diretamente se a mensagem for apenas uma string
+		// Se falhou o parse como JSON object, tenta como string JSON
 		var simpleMessage string
 		if err := json.Unmarshal(msg.Body, &simpleMessage); err == nil {
+			// É uma string JSON válida
+			log.Printf("Mensagem parseada como string JSON: %s", simpleMessage)
 			tipoIntegracao = simpleMessage
 			dados = make(map[string]interface{})
 		} else {
-			log.Printf("Campo 'type_message' ou 'tipoIntegracao' inválido ou ausente na mensagem")
-			return fmt.Errorf("campo 'type_message' ou 'tipoIntegracao' inválido ou ausente"), ""
+			// Se não é JSON válido, trata como string simples
+			log.Printf("Mensagem não é JSON válido, tratando como string simples")
+			messageStr := string(msg.Body)
+			// Remove aspas simples se existirem
+			if len(messageStr) >= 2 && messageStr[0] == '\'' && messageStr[len(messageStr)-1] == '\'' {
+				messageStr = messageStr[1 : len(messageStr)-1]
+			}
+			// Remove aspas duplas se existirem
+			if len(messageStr) >= 2 && messageStr[0] == '"' && messageStr[len(messageStr)-1] == '"' {
+				messageStr = messageStr[1 : len(messageStr)-1]
+			}
+			tipoIntegracao = messageStr
+			dados = make(map[string]interface{})
+			log.Printf("Tipo de integração extraído da string simples: %s", tipoIntegracao)
 		}
 	}
 
@@ -305,6 +343,11 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 			return fmt.Errorf("PromotionNormalizationUC não foi inicializado"), ""
 		}
 
+		if l.IntegrationUc == nil {
+			log.Printf("IntegrationUc não foi inicializado")
+			return fmt.Errorf("IntegrationUc não foi inicializado"), ""
+		}
+
 		result, err := l.PromotionNormalizationUC.NormalizePromotions()
 		if err != nil {
 			log.Printf("Erro ao processar normalização de promoções: %v", err)
@@ -318,6 +361,13 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 
 		log.Printf("Normalização de promoções concluída com sucesso. Processados: %d, Atualizados: %d, Duplicatas removidas: %d",
 			result.ProcessedCount, result.UpdatedCount, result.TotalRemovedDuplicates)
+
+	case "mover":
+		log.Printf("Iniciando processo de mover dados")
+
+		// Implementar a lógica de mover dados aqui
+		// Por enquanto, apenas um log de exemplo
+		log.Printf("Processo de mover dados concluído com sucesso")
 
 	default:
 		log.Printf("Tipo de processo desconhecido: %s", tipoIntegracao)

@@ -1,4 +1,4 @@
-package main
+package examples
 
 import (
 	"database/sql"
@@ -10,7 +10,8 @@ import (
 	rabbitmq "github.com/thiagohmm/integracaocron/internal/delivery"
 )
 
-func runProductIntegrationService() {
+// RunProductIntegrationService demonstrates the product integration service
+func RunProductIntegrationService() {
 	log.Println("Starting Product Integration Service...")
 
 	// Initialize database connection (you'll need to implement this based on your config)

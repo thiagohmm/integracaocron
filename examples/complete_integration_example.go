@@ -1,4 +1,4 @@
-package main
+package examples
 
 import (
 	"log"
@@ -12,8 +12,8 @@ import (
 	"github.com/thiagohmm/integracaocron/infraestructure/database"
 )
 
-// Complete example showing how to use the PromotionUseCase with IntegrationJobUseCase
-func main() {
+// RunCompleteIntegrationExample shows how to use the PromotionUseCase with IntegrationJobUseCase
+func RunCompleteIntegrationExample() {
 	// Load configuration
 	cfg, err := configuration.LoadConfig("../.env")
 	if err != nil {

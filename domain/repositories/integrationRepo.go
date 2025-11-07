@@ -125,6 +125,88 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoPromocao(dataCorte
 	return nil
 }
 
+func (r *IntegrationRepositoryImpl) CheckMarketingStructure() (bool, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := `SELECT COUNT(*) FROM INTEGR_ESTRUTURA_MERCADOLOGICA WHERE STATUS_PROCESSAMENTO = 'PENDENTE'`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		log.Printf("Erro ao verificar estrutura de marketing: %v", err)
+		return false, fmt.Errorf("erro ao verificar estrutura de marketing: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+func (r *IntegrationRepositoryImpl) CheckProductIntegration() (bool, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := `SELECT COUNT(*) FROM INTEGR_PRODUTO WHERE STATUS_PROCESSAMENTO = 'PENDENTE'`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		log.Printf("Erro ao verificar integração de produto: %v", err)
+		return false, fmt.Errorf("erro ao verificar integração de produto: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+func (r *IntegrationRepositoryImpl) CheckPackagingIntegration() (bool, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	query := `SELECT COUNT(*) FROM INTEGR_EMBALAGEM WHERE STATUS_PROCESSAMENTO = 'PENDENTE'`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		log.Printf("Erro ao verificar integração de embalagem: %v", err)
+		return false, fmt.Errorf("erro ao verificar integração de embalagem: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+func (r *IntegrationRepositoryImpl) CheckComboIntegration() (bool, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	query := `SELECT COUNT(*) FROM INTEGR_COMBO WHERE STATUS_PROCESSAMENTO = 'PENDENTE'`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		log.Printf("Erro ao verificar integração de combo: %v", err)
+		return false, fmt.Errorf("erro ao verificar integração de combo: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+func (r *IntegrationRepositoryImpl) CheckPromotionIntegration() (bool, error) {
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	query := `SELECT COUNT(*) FROM INTEGR_PROMOCAO WHERE STATUS_PROCESSAMENTO = 'PENDENTE'`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		log.Printf("Erro ao verificar integração de promoção: %v", err)
+		return false, fmt.Errorf("erro ao verificar integração de promoção: %w", err)
+	}
+
+	return count > 0, nil
+}
+
 // Data movement methods
 func (r *IntegrationRepositoryImpl) MoveIntegrationMarketingStructure(dataCorte time.Time) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)

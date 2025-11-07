@@ -1,4 +1,4 @@
-package main
+package examples
 
 import (
 	"database/sql"
@@ -10,8 +10,8 @@ import (
 	rabbitmq "github.com/thiagohmm/integracaocron/internal/delivery"
 )
 
-// runPromotionNormalizationService demonstrates how to set up the promotion normalization service
-func runPromotionNormalizationService() {
+// RunPromotionNormalizationService demonstrates how to set up the promotion normalization service
+func RunPromotionNormalizationService() {
 	log.Println("Starting Promotion Normalization Service...")
 
 	// Initialize database connection (you'll need to implement this based on your config)
