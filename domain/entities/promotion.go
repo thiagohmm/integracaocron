@@ -1,7 +1,7 @@
 package entities
 
 type Promotion struct {
-	IPMD_ID         int    `json:"ipmd_id"`
+	IPM_ID          int    `json:"ipm_id"`
 	Json            string `json:"json"`
 	DATARECEBIMENTO string `json:"datarecebimento"`
 }

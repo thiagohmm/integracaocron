@@ -228,26 +228,6 @@ func (r *ProductIntegrationRepository) GetProductPackagingByBarCode(barCode stri
 
 	return &pkg, nil
 }
-
-// GetUnitOfMeasurementByID retrieves unit of measurement by ID
-func (r *ProductIntegrationRepository) GetUnitOfMeasurementByID(id int) (*entities.UnitOfMeasurement, error) {
-	query := `SELECT ID_UNIDADE_MEDIDA, CODIGO_UNIDADE_MEDIDA, DESCRICAO_UNIDADE_MEDIDA 
-			  FROM UNIDADE_MEDIDA WHERE ID_UNIDADE_MEDIDA = :1`
-
-	var unit entities.UnitOfMeasurement
-	err := r.db.QueryRow(query, id).Scan(
-		&unit.IdUnidadeMedida, &unit.CodigoUnidadeMedida, &unit.DescricaoUnidadeMedida,
-	)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("error getting unit of measurement: %w", err)
-	}
-
-	return &unit, nil
-}
-
 // GetDepartmentNameByID retrieves department name by ID
 func (r *ProductIntegrationRepository) GetDepartmentNameByID(id *int) (string, error) {
 	if id == nil {
@@ -413,6 +393,26 @@ func (r *ProductIntegrationRepository) ValidateBrandDesc(descMarca string) *enti
 		Success: true,
 		Message: "Marca válida",
 	}
+}
+
+
+// AddOrUpdateStaging adds or updates a product integration staging record
+func (r *ProductIntegrationRepository) AddOrUpdateStaging(idProduto, idDealer int, jsonPayload string) error {
+	query := `
+		MERGE INTO PRODUTO_INTEGRACAO_STAGING dest
+		USING (SELECT :idProduto AS ID_PRODUTO, :idDealer AS ID_REVENDEDOR FROM dual) src
+		ON (dest.ID_PRODUTO = src.ID_PRODUTO AND dest.ID_REVENDEDOR = src.ID_REVENDEDOR)
+		WHEN MATCHED THEN
+			UPDATE SET dest.JSON = :jsonPayload, dest.DATA_ATUALIZACAO = SYSDATE
+		WHEN NOT MATCHED THEN
+			INSERT (ID_PRODUTO, ID_REVENDEDOR, JSON, DATA_ATUALIZACAO)
+			VALUES (:idProduto, :idDealer, :jsonPayload, SYSDATE)
+	`
+	_, err := r.db.Exec(query, idProduto, idDealer, jsonPayload)
+	if err != nil {
+		return fmt.Errorf("error adding or updating product integration staging: %w", err)
+	}
+	return nil
 }
 
 // ValidateIndustry validates industry

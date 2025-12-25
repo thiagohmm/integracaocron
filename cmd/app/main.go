@@ -41,6 +41,11 @@ func main() {
 	networkRepo := repositories.NewNetworkRepository(db)
 	productIntegrationRepo := repositories.NewProductIntegrationRepository(db)
 	promotionNormalizationRepo := repositories.NewPromotionNormalizationRepository(db)
+	productRepo := repositories.NewProductRepository(db)
+	productPackagingRepo := repositories.NewProductPackagingRepository(db)
+	unitOfMeasurementRepo := repositories.NewUnitOfMeasurementRepository(db)
+	packagingIntegrationStagingRepo := repositories.NewPackagingIntegrationStagingRepository(db)
+
 
 	// Get RabbitMQ configuration
 	rabbitmqURL := getRabbitMQURL(cfg)
@@ -49,9 +54,10 @@ func main() {
 	}
 
 	// Initialize use cases
-	integrationJobUC := usecases.NewIntegrationJobUseCase(parameterRepo, integrationRepo, networkRepo, db)
+	packagingIntegrationUC := usecases.NewPackagingIntegrationUseCase(productRepo, productPackagingRepo, unitOfMeasurementRepo, packagingIntegrationStagingRepo)
+	productIntegrationUC := usecases.NewProductIntegrationUseCase(productIntegrationRepo, packagingIntegrationUC, db)
+	integrationJobUC := usecases.NewIntegrationJobUseCase(parameterRepo, integrationRepo, networkRepo, productIntegrationUC, db)
 	promotionUC := usecases.NewPromotionUseCase(promotionRepo, rabbitmqURL, integrationJobUC)
-	productIntegrationUC := usecases.NewProductIntegrationUseCase(productIntegrationRepo, db)
 	promotionNormalizationUC := usecases.NewPromotionNormalizationUseCase(promotionNormalizationRepo, db)
 
 	// Get number of workers from environment or use default

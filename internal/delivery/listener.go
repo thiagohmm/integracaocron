@@ -87,7 +87,7 @@ func (l *Listener) ListenToQueue(rabbitmqurl string) error {
 			continue
 		}
 
-		queue := "integracaoCron"
+		queue := "integracao"
 
 		// Declare queue to ensure it exists
 		_, err = ch.QueueDeclare(
@@ -291,25 +291,48 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 
 	case "promocao", "Promocao":
 		log.Printf("Iniciando processamento de promoção")
-		var promocao entities.Promotion
-		promocaoBytes, err := json.Marshal(dados)
-		if err != nil {
-			log.Printf("Erro ao serializar dados de promoção: %v", err)
-			return fmt.Errorf("erro ao serializar dados de promoção: %w", err), ""
-		}
-		if err := json.Unmarshal(promocaoBytes, &promocao); err != nil {
-			log.Printf("Erro ao desserializar dados para entities.Promotion: %v", err)
-			return fmt.Errorf("erro ao desserializar dados para entities.Promotion: %w", err), ""
-		}
-		err = l.PromocaoUC.ProcessarPromocao(promocao)
-		if err != nil {
-			log.Printf("Erro ao processar promoção: %v", err)
-			return fmt.Errorf("erro ao processar promoção: %w", err), ""
-		}
-		err = l.IntegrationUc.IntegrationJob()
-		if err != nil {
-			log.Printf("Erro ao processar integração: %v", err)
-			return fmt.Errorf("erro ao processar integração: %w", err), ""
+
+		// Check if we have specific promotion data or should process all pending
+		if len(dados) == 0 || (dados["ipm_id"] == nil && dados["IPM_ID"] == nil) {
+			// No specific promotion data, process all pending promotions from database
+			log.Printf("Nenhum dado específico de promoção fornecido, processando todas as promoções pendentes do banco")
+			err := l.PromocaoUC.ProcessarTodasPromocoesPendentes()
+			if err != nil {
+				log.Printf("Erro ao processar promoções pendentes: %v", err)
+				return fmt.Errorf("erro ao processar promoções pendentes: %w", err), ""
+			}
+		} else {
+			// Specific promotion data provided, process it
+			log.Printf("Dados específicos de promoção fornecidos, processando promoção individual")
+			var promocao entities.Promotion
+			promocaoBytes, err := json.Marshal(dados)
+			if err != nil {
+				log.Printf("Erro ao serializar dados de promoção: %v", err)
+				return fmt.Errorf("erro ao serializar dados de promoção: %w", err), ""
+			}
+			if err := json.Unmarshal(promocaoBytes, &promocao); err != nil {
+				log.Printf("Erro ao desserializar dados para entities.Promotion: %v", err)
+				return fmt.Errorf("erro ao desserializar dados para entities.Promotion: %w", err), ""
+			}
+
+			// Validate promotion has valid ID
+			if promocao.IPM_ID == 0 {
+				log.Printf("IPM_ID inválido (0), não é possível processar promoção vazia")
+				return fmt.Errorf("IPM_ID inválido: não é possível processar promoção com ID 0"), ""
+			}
+
+			err = l.PromocaoUC.ProcessarPromocao(promocao)
+			if err != nil {
+				log.Printf("Erro ao processar promoção: %v", err)
+				return fmt.Errorf("erro ao processar promoção: %w", err), ""
+			}
+
+			// Call integration job after processing individual promotion
+			err = l.IntegrationUc.IntegrationJob()
+			if err != nil {
+				log.Printf("Erro ao processar integração: %v", err)
+				return fmt.Errorf("erro ao processar integração: %w", err), ""
+			}
 		}
 
 		log.Printf("Processamento de promoção concluído")

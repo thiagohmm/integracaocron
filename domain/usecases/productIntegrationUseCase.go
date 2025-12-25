@@ -14,17 +14,40 @@ import (
 
 // ProductIntegrationUseCase handles product integration business logic
 type ProductIntegrationUseCase struct {
-	repo *repositories.ProductIntegrationRepository
-	db   *sql.DB
+	repo                  *repositories.ProductIntegrationRepository
+	packagingUseCase      *PackagingIntegrationUseCase
+	db                    *sql.DB
 }
 
 // NewProductIntegrationUseCase creates a new instance of ProductIntegrationUseCase
-func NewProductIntegrationUseCase(repo *repositories.ProductIntegrationRepository, db *sql.DB) *ProductIntegrationUseCase {
+func NewProductIntegrationUseCase(repo *repositories.ProductIntegrationRepository, packagingUseCase *PackagingIntegrationUseCase, db *sql.DB) *ProductIntegrationUseCase {
 	return &ProductIntegrationUseCase{
-		repo: repo,
-		db:   db,
+		repo:                  repo,
+		packagingUseCase:      packagingUseCase,
+		db:                    db,
 	}
 }
+
+// IntegrateProductService integrates a product and its packaging
+func (uc *ProductIntegrationUseCase) IntegrateProductService(idProduto, idDealer int, item entities.ProductSelectIntegration) error {
+	jsonPayload, err := json.Marshal(item)
+	if err != nil {
+		return fmt.Errorf("error marshalling product select: %w", err)
+	}
+
+	err = uc.repo.AddOrUpdateStaging(idProduto, idDealer, string(jsonPayload))
+	if err != nil {
+		return fmt.Errorf("error adding or updating product staging: %w", err)
+	}
+
+	err = uc.packagingUseCase.PackagingIntegrateService(idProduto, idDealer)
+	if err != nil {
+		return fmt.Errorf("error integrating packaging: %w", err)
+	}
+
+	return nil
+}
+
 
 // ImportProductIntegration is the main function that imports product integrations
 func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {

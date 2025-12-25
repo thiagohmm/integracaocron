@@ -51,8 +51,8 @@ func (r *PromotionRepositoryImpl) GetIntegrRMSPromocaoIN() ([]entities.Promotion
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `SELECT IPMD_ID, JSON_DATA, DATARECEBIMENTO 
-			  FROM INTEGR_RMS_PROMOCAO_IN 
+	query := `SELECT IPM_ID, JSON, DATARECEBIMENTO 
+			  FROM INTEGRRMSPROMOCAOIN 
 			  ORDER BY DATARECEBIMENTO`
 
 	rows, err := r.db.QueryContext(ctx, query)
@@ -68,7 +68,7 @@ func (r *PromotionRepositoryImpl) GetIntegrRMSPromocaoIN() ([]entities.Promotion
 		var jsonData sql.NullString
 		var dataRecebimento sql.NullString
 
-		err := rows.Scan(&promo.IPMD_ID, &jsonData, &dataRecebimento)
+		err := rows.Scan(&promo.IPM_ID, &jsonData, &dataRecebimento)
 		if err != nil {
 			log.Printf("Erro ao escanear linha de promoção: %v", err)
 			continue
@@ -94,7 +94,7 @@ func (r *PromotionRepositoryImpl) DeletePorObjeto(ipmID int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := "DELETE FROM INTEGR_RMS_PROMOCAO_IN WHERE IPMD_ID = :1"
+	query := "DELETE FROM INTEGRRMSPROMOCAOIN WHERE IPM_ID = :1"
 
 	result, err := r.db.ExecContext(ctx, query, ipmID)
 	if err != nil {

@@ -39,8 +39,70 @@ func NewPromotionUseCase(promotionRepo entities.PromotionRepository, rabbitmqURL
 func (uc *PromotionUseCase) ProcessarPromocao(dados entities.Promotion) error {
 	log.Printf("Iniciando processamento de promoção com dados: %+v", dados)
 
+	// Validate promotion data
+	if dados.IPM_ID == 0 {
+		log.Printf("IPM_ID inválido (0), ignorando promoção vazia")
+		return fmt.Errorf("IPM_ID inválido: não é possível processar promoção com ID 0")
+	}
+
 	// Call the main integration processing
 	return uc.ProcessIntegrationPromotions(dados)
+}
+
+// ProcessarTodasPromocoesPendentes fetches and processes all pending promotions from database
+// This method should be called when receiving a simple "promocao" message
+func (uc *PromotionUseCase) ProcessarTodasPromocoesPendentes() error {
+	log.Printf("Iniciando processamento de todas as promoções pendentes...")
+
+	// Fetch all pending promotions from database
+	promotions, err := uc.promotionRepo.GetIntegrRMSPromocaoIN()
+	if err != nil {
+		log.Printf("Erro ao buscar promoções pendentes: %v", err)
+		return fmt.Errorf("erro ao buscar promoções pendentes: %w", err)
+	}
+
+	if len(promotions) == 0 {
+		log.Printf("Nenhuma promoção pendente encontrada para processar")
+		return nil
+	}
+
+	log.Printf("Encontradas %d promoções pendentes para processar", len(promotions))
+
+	// Process each promotion
+	successCount := 0
+	errorCount := 0
+
+	for _, promo := range promotions {
+		log.Printf("Processando promoção ID: %d", promo.IPM_ID)
+
+		err := uc.ProcessIntegrationPromotions(promo)
+		if err != nil {
+			log.Printf("Erro ao processar promoção %d: %v", promo.IPM_ID, err)
+			errorCount++
+		} else {
+			log.Printf("Promoção %d processada com sucesso", promo.IPM_ID)
+			successCount++
+		}
+	}
+
+	log.Printf("Processamento concluído: %d sucessos, %d erros", successCount, errorCount)
+
+	// Call the integration job at the end (optional - skip if tables don't exist)
+	if uc.integrationJobUC != nil {
+		log.Println("Chamando job de integração no final do processamento...")
+		if err := uc.integrationJobUC.IntegrationJob(); err != nil {
+			log.Printf("AVISO: Job de integração falhou (pode ser ignorado se tabelas não existem): %v", err)
+			// Don't return error here to avoid failing the main promotion processing
+		} else {
+			log.Printf("Job de integração executado com sucesso")
+		}
+	}
+
+	if errorCount > 0 {
+		return fmt.Errorf("processamento concluído com %d erros de %d promoções", errorCount, len(promotions))
+	}
+
+	return nil
 }
 
 // ProcessIntegrationPromotions processes all pending promotion integrations
@@ -49,14 +111,16 @@ func (uc *PromotionUseCase) ProcessIntegrationPromotions(dados entities.Promotio
 	// Process the individual promotion
 	uc.processIndividualPromotion(dados)
 
-	// Call the integration job at the end (equivalent to productNetworkMain)
+	// Call the integration job at the end (equivalent to productNetworkMain) - optional
 	if uc.integrationJobUC != nil {
 		log.Println("Chamando job de integração no final do processamento de promoção...")
 		dataCorte := time.Now()
 		if err := uc.integrationJobUC.ProductNetworkMain(dataCorte); err != nil {
-			log.Printf("Erro ao executar job de integração: %v", err)
+			log.Printf("AVISO: Job de integração falhou (pode ser ignorado se tabelas não existem): %v", err)
 			// Don't return error here to avoid failing the main promotion processing
 			// The integration job error will be logged but won't affect the promotion result
+		} else {
+			log.Printf("Job de integração executado com sucesso")
 		}
 	}
 
@@ -67,15 +131,15 @@ func (uc *PromotionUseCase) ProcessIntegrationPromotions(dados entities.Promotio
 func (uc *PromotionUseCase) processIndividualPromotion(promo entities.Promotion) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("Recovered from panic while processing promotion %d: %v", promo.IPMD_ID, r)
+			log.Printf("Recovered from panic while processing promotion %d: %v", promo.IPM_ID, r)
 			uc.handlePromotionError(promo, fmt.Errorf("panic: %v", r))
 		}
 	}()
 
 	// Call the dopkg_promotion function (equivalent to the TypeScript version)
-	promocao, err := uc.promotionRepo.Dopkg_promotion(promo.IPMD_ID)
+	promocao, err := uc.promotionRepo.Dopkg_promotion(promo.IPM_ID)
 	if err != nil {
-		log.Printf("Erro ao processar promoção %d: %v", promo.IPMD_ID, err)
+		log.Printf("Erro ao processar promoção %d: %v", promo.IPM_ID, err)
 		uc.handlePromotionError(promo, err)
 		return
 	}
@@ -83,9 +147,9 @@ func (uc *PromotionUseCase) processIndividualPromotion(promo entities.Promotion)
 	log.Printf("promocao: %+v", promocao)
 
 	// Delete the processed promotion (equivalent to deletePorObjeto)
-	err = uc.deletePorObjeto(promo.IPMD_ID)
+	err = uc.deletePorObjeto(promo.IPM_ID)
 	if err != nil {
-		log.Printf("Erro ao deletar promoção %d: %v", promo.IPMD_ID, err)
+		log.Printf("Erro ao deletar promoção %d: %v", promo.IPM_ID, err)
 		// Continue processing and log the success/failure of the main operation
 	}
 
@@ -126,9 +190,9 @@ func (uc *PromotionUseCase) handlePromotionError(promo entities.Promotion, err e
 	log.Printf("Erro ao processar promoção: %v", err)
 
 	// Delete the problematic promotion
-	deleteErr := uc.deletePorObjeto(promo.IPMD_ID)
+	deleteErr := uc.deletePorObjeto(promo.IPM_ID)
 	if deleteErr != nil {
-		log.Printf("Erro ao deletar promoção com erro %d: %v", promo.IPMD_ID, deleteErr)
+		log.Printf("Erro ao deletar promoção com erro %d: %v", promo.IPM_ID, deleteErr)
 	}
 
 	// Convert prom otion to JSON string

@@ -12,10 +12,11 @@ import (
 
 // IntegrationJobUseCase handles the main integration job operations
 type IntegrationJobUseCase struct {
-	parameterRepo   entities.ParameterRepository
-	integrationRepo entities.IntegrationRepository
-	networkRepo     entities.NetworkRepository
-	db              *sql.DB
+	parameterRepo         entities.ParameterRepository
+	integrationRepo       entities.IntegrationRepository
+	networkRepo           entities.NetworkRepository
+	productIntegrationUC *ProductIntegrationUseCase
+	db                    *sql.DB
 }
 
 // NewIntegrationJobUseCase creates a new instance of IntegrationJobUseCase
@@ -23,15 +24,18 @@ func NewIntegrationJobUseCase(
 	parameterRepo entities.ParameterRepository,
 	integrationRepo entities.IntegrationRepository,
 	networkRepo entities.NetworkRepository,
+	productIntegrationUC *ProductIntegrationUseCase,
 	db *sql.DB,
 ) *IntegrationJobUseCase {
 	return &IntegrationJobUseCase{
-		parameterRepo:   parameterRepo,
-		integrationRepo: integrationRepo,
-		networkRepo:     networkRepo,
-		db:              db,
+		parameterRepo:         parameterRepo,
+		integrationRepo:       integrationRepo,
+		networkRepo:           networkRepo,
+		productIntegrationUC: productIntegrationUC,
+		db:                    db,
 	}
 }
+
 
 // ProductNetworkMain is the Go equivalent of the main TypeScript function
 func (uc *IntegrationJobUseCase) ProductNetworkMain(dataCorte time.Time) error {
@@ -324,10 +328,23 @@ func (uc *IntegrationJobUseCase) ReplicateNetworkProductsJob() error {
 				continue
 			}
 
-			_, err = uc.networkRepo.GetProductsByReplicateNetworkServiceNew(ljsItem.IdRevendedor)
+			products, err := uc.networkRepo.GetProductsByReplicateNetworkServiceNew(ljsItem.IdRevendedor)
 			if err != nil {
 				log.Printf("Erro ao obter produtos para replicação do revendedor %d: %v", ljsItem.IdRevendedor, err)
 				continue
+			}
+
+			for _, product := range products {
+				// The product object from the database needs to be converted to the ProductSelectIntegration struct
+				// This is a placeholder, as the actual mapping will depend on the structure of the returned product
+				productSelect := entities.ProductSelectIntegration{
+					CodRMS: fmt.Sprintf("%d", product.CodigoRMS),
+					// Map other fields as necessary
+				}
+				err := uc.productIntegrationUC.IntegrateProductService(product.IdProduto, ljsItem.IdRevendedor, productSelect)
+				if err != nil {
+					log.Printf("Error integrating product %d for dealer %d: %v", product.IdProduto, ljsItem.IdRevendedor, err)
+				}
 			}
 		}
 	}

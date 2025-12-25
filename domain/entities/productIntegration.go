@@ -216,6 +216,16 @@ type QueueMessage struct {
 	Values []interface{} `json:"values"`
 }
 
+
+// ProductIntegrationStaging represents the product integration staging entity
+type ProductIntegrationStaging struct {
+	IdIntegrationProdutoStaging int       `json:"id_integration_produto_staging" db:"ID_INTEGRACAO_PRODUTO_STAGING"`
+	IdProduto                   int       `json:"id_produto" db:"ID_PRODUTO"`
+	IdRevendedor                int       `json:"id_revendedor" db:"ID_REVENDEDOR"`
+	Json                        string    `json:"json" db:"JSON"`
+	DataAtualizacao             time.Time `json:"data_atualizacao" db:"DATA_ATUALIZACAO"`
+}
+
 // Constants for product integration
 const (
 	CONST_TRUE    = "true"
