@@ -27,7 +27,7 @@ func (r *ParameterRepositoryImpl) ListByCodeParameter(codigo string) (*entities.
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `SELECT ID_PARAMETRO, AMBIENTE, CODIGO, VALOR, DESCRICAO FROM Parametro WHERE CODIGO = :1`
+	query := `SELECT IDPARAMETRO, AMBIENTE, CODIGO, VALOR, DESCRICAO FROM Parametro WHERE CODIGO = :1`
 
 	var param entities.IParameter
 	err := r.db.QueryRowContext(ctx, query, codigo).Scan(
@@ -56,7 +56,7 @@ func (r *ParameterRepositoryImpl) Update(param *entities.IParameter) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `UPDATE Parametro SET AMBIENTE = :1, CODIGO = :2, VALOR = :3, DESCRICAO = :4 WHERE ID_PARAMETRO = :5`
+	query := `UPDATE Parametro SET AMBIENTE = :1, CODIGO = :2, VALOR = :3, DESCRICAO = :4 WHERE IDPARAMETRO = :5`
 
 	result, err := r.db.ExecContext(ctx, query, param.Ambiente, param.Codigo, param.Valor, param.Descricao, param.IdParametro)
 	if err != nil {
@@ -84,7 +84,7 @@ func (r *ParameterRepositoryImpl) Delete(idParametro int) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `DELETE FROM Parametro WHERE ID_PARAMETRO = :1`
+	query := `DELETE FROM Parametro WHERE IDPARAMETRO = :1`
 
 	result, err := r.db.ExecContext(ctx, query, idParametro)
 	if err != nil {
@@ -112,7 +112,7 @@ func (r *ParameterRepositoryImpl) ListById(idParametro int) (*entities.IParamete
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `SELECT ID_PARAMETRO, AMBIENTE, CODIGO, VALOR, DESCRICAO FROM Parametro WHERE ID_PARAMETRO = :1`
+	query := `SELECT IDPARAMETRO, AMBIENTE, CODIGO, VALOR, DESCRICAO FROM Parametro WHERE IDPARAMETRO = :1`
 
 	var param entities.IParameter
 	err := r.db.QueryRowContext(ctx, query, idParametro).Scan(
@@ -141,7 +141,7 @@ func (r *ParameterRepositoryImpl) ListGridPerFilter(filter *entities.IFilterPara
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	baseQuery := `SELECT ID_PARAMETRO, AMBIENTE, CODIGO, VALOR, DESCRICAO FROM Parametro WHERE 1=1`
+	baseQuery := `SELECT IDPARAMETRO, AMBIENTE, CODIGO, VALOR, DESCRICAO FROM Parametro WHERE 1=1`
 	var args []interface{}
 	argCount := 0
 
@@ -195,7 +195,7 @@ func (r *ParameterRepositoryImpl) Create(param *entities.IParameter) (*entities.
 
 	query := `INSERT INTO Parametro (AMBIENTE, CODIGO, VALOR, DESCRICAO) 
 			  VALUES (:1, :2, :3, :4) 
-			  RETURNING ID_PARAMETRO INTO :5`
+			  RETURNING IDPARAMETRO INTO :5`
 
 	var newID int
 	_, err := r.db.ExecContext(ctx, query, param.Ambiente, param.Codigo, param.Valor, param.Descricao, &newID)

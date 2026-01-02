@@ -51,9 +51,9 @@ func (r *IntegrationRepositoryImpl) ClearIntegrationPackagingByCutOffDate(dataCo
 
 	var query string
 	if len(expurgo) > 0 && expurgo[0] == "SIM" {
-		query = `DELETE FROM INTEGR_EMBALAGEM WHERE DATA_INTEGRACAO < :1`
+		query = `DELETE FROM INTEGRACAOEMBALAGEM WHERE DATAATUALIZACAO < :1`
 	} else {
-		query = `UPDATE INTEGR_EMBALAGEM SET STATUS_PROCESSAMENTO = 'REMOVIDO' WHERE DATA_INTEGRACAO < :1`
+		query = `UPDATE INTEGRACAOEMBALAGEM SET ENVIANDO = '0' WHERE DATAATUALIZACAO < :1`
 	}
 
 	_, err := r.db.ExecContext(ctx, query, dataCorte)
@@ -71,9 +71,9 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoEstruturaMercadolo
 
 	var query string
 	if len(expurgo) > 0 && expurgo[0] == "SIM" {
-		query = `DELETE FROM INTEGR_ESTRUTURA_MERCADOLOGICA WHERE DATA_INTEGRACAO < :1`
+		query = `DELETE FROM INTEGRACAOESTRUTURAMERCADOLOGICA WHERE DATAATUALIZACAO < :1`
 	} else {
-		query = `UPDATE INTEGR_ESTRUTURA_MERCADOLOGICA SET STATUS_PROCESSAMENTO = 'REMOVIDO' WHERE DATA_INTEGRACAO < :1`
+		query = `UPDATE INTEGRACAOESTRUTURAMERCADOLOGICA SET ENVIANDO = '0' WHERE DATAATUALIZACAO < :1`
 	}
 
 	_, err := r.db.ExecContext(ctx, query, dataCorte)
@@ -91,9 +91,9 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoProduto(dataCorte 
 
 	var query string
 	if len(expurgo) > 0 && expurgo[0] == "SIM" {
-		query = `DELETE FROM INTEGR_PRODUTO WHERE DATA_INTEGRACAO < :1`
+		query = `DELETE FROM INTEGRACAOPRODUTO WHERE DATAATUALIZACAO < :1`
 	} else {
-		query = `UPDATE INTEGR_PRODUTO SET STATUS_PROCESSAMENTO = 'REMOVIDO' WHERE DATA_INTEGRACAO < :1`
+		query = `UPDATE INTEGRACAOPRODUTO SET ENVIANDO = '0' WHERE DATAATUALIZACAO < :1`
 	}
 
 	_, err := r.db.ExecContext(ctx, query, dataCorte)
@@ -111,9 +111,9 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoPromocao(dataCorte
 
 	var query string
 	if len(expurgo) > 0 && expurgo[0] == "SIM" {
-		query = `DELETE FROM INTEGR_PROMOCAO WHERE DATA_INTEGRACAO < :1`
+		query = `DELETE FROM INTEGRACAOPROMOCAO WHERE DATAATUALIZACAO < :1`
 	} else {
-		query = `UPDATE INTEGR_PROMOCAO SET STATUS_PROCESSAMENTO = 'REMOVIDO' WHERE DATA_INTEGRACAO < :1`
+		query = `UPDATE INTEGRACAOPROMOCAO SET ENVIANDO = '0' WHERE DATAATUALIZACAO < :1`
 	}
 
 	_, err := r.db.ExecContext(ctx, query, dataCorte)
@@ -130,7 +130,7 @@ func (r *IntegrationRepositoryImpl) CheckMarketingStructure() (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `SELECT COUNT(*) FROM INTEGR_ESTRUTURA_MERCADOLOGICA WHERE STATUS_PROCESSAMENTO = 'PENDENTE'`
+	query := `SELECT COUNT(*) FROM INTEGRACAOESTRUTURAMERCADOLOGICA WHERE ENVIANDO = '1'`
 
 	var count int
 	err := r.db.QueryRowContext(ctx, query).Scan(&count)
@@ -147,7 +147,7 @@ func (r *IntegrationRepositoryImpl) CheckProductIntegration() (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `SELECT COUNT(*) FROM INTEGR_PRODUTO WHERE STATUS_PROCESSAMENTO = 'PENDENTE'`
+	query := `SELECT COUNT(*) FROM INTEGRACAOPRODUTO WHERE ENVIANDO = '1'`
 
 	var count int
 	err := r.db.QueryRowContext(ctx, query).Scan(&count)
@@ -163,7 +163,7 @@ func (r *IntegrationRepositoryImpl) CheckPackagingIntegration() (bool, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	query := `SELECT COUNT(*) FROM INTEGR_EMBALAGEM WHERE STATUS_PROCESSAMENTO = 'PENDENTE'`
+	query := `SELECT COUNT(*) FROM INTEGRACAOEMBALAGEM WHERE ENVIANDO = '1'`
 
 	var count int
 	err := r.db.QueryRowContext(ctx, query).Scan(&count)
@@ -179,7 +179,7 @@ func (r *IntegrationRepositoryImpl) CheckComboIntegration() (bool, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	query := `SELECT COUNT(*) FROM INTEGR_COMBO WHERE STATUS_PROCESSAMENTO = 'PENDENTE'`
+	query := `SELECT COUNT(*) FROM INTEGRACAOCOMBO WHERE ENVIANDO = '1'`
 
 	var count int
 	err := r.db.QueryRowContext(ctx, query).Scan(&count)
@@ -195,7 +195,7 @@ func (r *IntegrationRepositoryImpl) CheckPromotionIntegration() (bool, error) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	query := `SELECT COUNT(*) FROM INTEGR_PROMOCAO WHERE STATUS_PROCESSAMENTO = 'PENDENTE'`
+	query := `SELECT COUNT(*) FROM INTEGRACAOPROMOCAO WHERE ENVIANDO = '1'`
 
 	var count int
 	err := r.db.QueryRowContext(ctx, query).Scan(&count)
@@ -294,9 +294,9 @@ func (r *IntegrationRepositoryImpl) GetIntegrationUpdateComboByDate(dataCorte ti
 	defer cancel()
 
 	query := `
-		SELECT ID_INTEGRACAO_COMBO, ID_REVENDEDOR, ID_COMBO_PROMOCAO, 
-			   ENVIANDO, JSON, DATA_ATUALIZACAO, TRANSACAO, DATA_INICIO_ENVIO
-		FROM INTEGR_COMBO WHERE DATA_ATUALIZACAO < :1`
+		SELECT IDINTEGRACAOCOMBO, IDREVENDEDOR, IDCOMBOPROMOCAO, 
+			   ENVIANDO, JSON, DATAATUALIZACAO, TRANSACAO, DATAINICIOENVIO
+		FROM INTEGRACAOCOMBO WHERE DATAATUALIZACAO < :1`
 
 	rows, err := r.db.QueryContext(ctx, query, dataCorte)
 	if err != nil {
@@ -332,7 +332,7 @@ func (r *IntegrationRepositoryImpl) DeleteIntegrationCombo(idIntegracaoCombo int
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `DELETE FROM INTEGR_COMBO WHERE ID_INTEGRACAO_COMBO = :1`
+	query := `DELETE FROM INTEGRACAOCOMBO WHERE IDINTEGRACAOCOMBO = :1`
 
 	_, err := r.db.ExecContext(ctx, query, idIntegracaoCombo)
 	if err != nil {

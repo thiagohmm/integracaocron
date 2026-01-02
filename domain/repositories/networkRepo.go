@@ -167,7 +167,7 @@ func (r *NetworkRepositoryImpl) GetProductsByReplicateNetworkServiceNew(idRevend
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `SELECT Cod FROM Produtos WHERE IdRevendedor = :1 AND StatusReplicacao = 'PENDENTE'`
+	query := `SELECT Cod, CODIGO_RMS, ID_PRODUTO FROM Produtos WHERE IdRevendedor = :1 AND StatusReplicacao = 'PENDENTE'`
 
 	rows, err := r.db.QueryContext(ctx, query, idRevendedor)
 	if err != nil {
@@ -179,7 +179,7 @@ func (r *NetworkRepositoryImpl) GetProductsByReplicateNetworkServiceNew(idRevend
 	var products []entities.ProductSelect
 	for rows.Next() {
 		var product entities.ProductSelect
-		err := rows.Scan(&product.Cod)
+		err := rows.Scan(&product.Cod, &product.CodigoRMS, &product.IdProduto)
 		if err != nil {
 			log.Printf("Erro ao escanear produto para replicação: %v", err)
 			continue
@@ -196,7 +196,7 @@ func (r *NetworkRepositoryImpl) GetProductsByReplicateNetworkReplicate(idProduto
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	query := `SELECT Cod FROM Produtos WHERE IdProduto = :1 AND StatusReplicacao = 'ATIVO'`
+	query := `SELECT Cod, CODIGO_RMS, ID_PRODUTO FROM Produtos WHERE IdProduto = :1 AND StatusReplicacao = 'ATIVO'`
 
 	rows, err := r.db.QueryContext(ctx, query, idProduto)
 	if err != nil {
@@ -208,7 +208,7 @@ func (r *NetworkRepositoryImpl) GetProductsByReplicateNetworkReplicate(idProduto
 	var products []entities.ProductSelect
 	for rows.Next() {
 		var product entities.ProductSelect
-		err := rows.Scan(&product.Cod)
+		err := rows.Scan(&product.Cod, &product.CodigoRMS, &product.IdProduto)
 		if err != nil {
 			log.Printf("Erro ao escanear produto para replicação de rede: %v", err)
 			continue

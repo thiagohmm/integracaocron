@@ -3,8 +3,6 @@ package repositories
 import (
 	"database/sql"
 	"fmt"
-
-	"github.com/thiagohmm/integracaocron/domain/entities"
 )
 
 // PackagingIntegrationStagingRepository handles packaging integration staging database operations
@@ -22,14 +20,14 @@ func NewPackagingIntegrationStagingRepository(db *sql.DB) *PackagingIntegrationS
 // AddOrUpdate adds or updates a packaging integration staging record
 func (r *PackagingIntegrationStagingRepository) AddOrUpdate(idEmbalagemProduto, idDealer int, jsonPayload string) error {
 	query := `
-		MERGE INTO INTEGRACAO_EMBALAGEM_STAGING dest
-		USING (SELECT :idEmbalagemProduto AS ID_EMBALAGEM_PRODUTO, :idDealer AS ID_REVENDEDOR FROM dual) src
-		ON (dest.ID_EMBALAGEM_PRODUTO = src.ID_EMBALAGEM_PRODUTO AND dest.ID_REVENDEDOR = src.ID_REVENDEDOR)
+		MERGE INTO INTEGRACAOEMBALAGEMSTAGING dest
+		USING (SELECT :idEmbalagemProduto AS IDEMBALAGEMPRODUTO, :idDealer AS IDREVENDEDOR FROM dual) src
+		ON (dest.IDEMBALAGEMPRODUTO = src.IDEMBALAGEMPRODUTO AND dest.IDREVENDEDOR = src.IDREVENDEDOR)
 		WHEN MATCHED THEN
-			UPDATE SET dest.JSON = :jsonPayload, dest.DATA_ATUALIZACAO = SYSDATE
+			UPDATE SET dest.JSON = :jsonPayload, dest.DATAATUALIZACAO = SYSTIMESTAMP
 		WHEN NOT MATCHED THEN
-			INSERT (ID_EMBALAGEM_PRODUTO, ID_REVENDEDOR, JSON, DATA_ATUALIZACAO)
-			VALUES (:idEmbalagemProduto, :idDealer, :jsonPayload, SYSDATE)
+			INSERT (IDEMBALAGEMPRODUTO, IDREVENDEDOR, JSON, DATAATUALIZACAO)
+			VALUES (:idEmbalagemProduto, :idDealer, :jsonPayload, SYSTIMESTAMP)
 	`
 	_, err := r.db.Exec(query, idEmbalagemProduto, idDealer, jsonPayload)
 	if err != nil {

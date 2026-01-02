@@ -4,7 +4,7 @@ import "time"
 
 // IParameter represents a system parameter
 type IParameter struct {
-	IdParametro int    `json:"id_parametro" db:"ID_PARAMETRO"`
+	IdParametro int    `json:"id_parametro" db:"IDPARAMETRO"`
 	Codigo      string `json:"codigo" db:"CODIGO"`
 	Valor       string `json:"valor" db:"VALOR"`
 	Ambiente    string `json:"ambiente" db:"AMBIENTE"`
@@ -19,50 +19,62 @@ type IFilterParameter struct {
 
 // IntegrationCombo represents combo integration data
 type IntegrationCombo struct {
-	IdIntegracaoCombo int        `json:"id_integracao_combo" db:"ID_INTEGRACAO_COMBO"`
-	IdRevendedor      int        `json:"id_revendedor" db:"ID_REVENDEDOR"`
-	IdComboPromocao   int        `json:"id_combo_promocao" db:"ID_COMBO_PROMOCAO"`
+	IdIntegracaoCombo int        `json:"id_integracao_combo" db:"IDINTEGRACAOCOMBO"`
+	IdRevendedor      int        `json:"id_revendedor" db:"IDREVENDEDOR"`
+	IdComboPromocao   int        `json:"id_combo_promocao" db:"IDCOMBOPROMOCAO"`
 	Enviando          *string    `json:"enviando" db:"ENVIANDO"`
 	Json              *string    `json:"json" db:"JSON"`
-	DataAtualizacao   *time.Time `json:"data_atualizacao" db:"DATA_ATUALIZACAO"`
+	DataAtualizacao   *time.Time `json:"data_atualizacao" db:"DATAATUALIZACAO"`
 	Transacao         *string    `json:"transacao" db:"TRANSACAO"`
-	DataInicioEnvio   *time.Time `json:"data_inicio_envio" db:"DATA_INICIO_ENVIO"`
+	DataInicioEnvio   *time.Time `json:"data_inicio_envio" db:"DATAINICIOENVIO"`
 }
 
 // IntegrationPackaging represents packaging integration data
 type IntegrationPackaging struct {
-	IdIntegracaoEmbalagem int        `json:"id_integracao_embalagem" db:"ID_INTEGRACAO_EMBALAGEM"`
-	IdRevendedor          int        `json:"id_revendedor" db:"ID_REVENDEDOR"`
-	IdEmbalagemProduto    int        `json:"id_embalagem_produto" db:"ID_EMBALAGEM_PRODUTO"`
+	IdIntegracaoEmbalagem int        `json:"id_integracao_embalagem" db:"IDINTEGRACAOEMBALAGEM"`
+	IdRevendedor          int        `json:"id_revendedor" db:"IDREVENDEDOR"`
+	IdEmbalagemProduto    int        `json:"id_embalagem_produto" db:"IDEMBALAGEMPRODUTO"`
 	Enviando              *string    `json:"enviando" db:"ENVIANDO"`
 	Json                  *string    `json:"json" db:"JSON"`
-	DataAtualizacao       *time.Time `json:"data_atualizacao" db:"DATA_ATUALIZACAO"`
+	DataAtualizacao       *time.Time `json:"data_atualizacao" db:"DATAATUALIZACAO"`
 	Transacao             *string    `json:"transacao" db:"TRANSACAO"`
-	DataInicioEnvio       *time.Time `json:"data_inicio_envio" db:"DATA_INICIO_ENVIO"`
+	DataInicioEnvio       *time.Time `json:"data_inicio_envio" db:"DATAINICIOENVIO"`
 }
 
 // IntegrationMarketingStructure represents marketing structure integration data
 type IntegrationMarketingStructure struct {
-	IdIntegracaoEstruturaMercadologica int        `json:"id_integracao_estrutura_mercadologica" db:"ID_INTEGRACAO_ESTRUTURA_MERCADOLOGICA"`
-	IdRevendedor                       int        `json:"id_revendedor" db:"ID_REVENDEDOR"`
-	IdEstruturaMercadologica           int        `json:"id_estrutura_mercadologica" db:"ID_ESTRUTURA_MERCADOLOGICA"`
+	IdIntegracaoEstruturaMercadologica int        `json:"id_integracao_estrutura_mercadologica" db:"IDINTEGRACAOESTRUTURAMERCADOLOGICA"`
+	IdRevendedor                       int        `json:"id_revendedor" db:"IDREVENDEDOR"`
+	IdEstruturaMercadologica           int        `json:"id_estrutura_mercadologica" db:"IDESTRUTURAMERCADOLOGICA"`
 	Enviando                           *string    `json:"enviando" db:"ENVIANDO"`
 	Json                               *string    `json:"json" db:"JSON"`
-	DataAtualizacao                    *time.Time `json:"data_atualizacao" db:"DATA_ATUALIZACAO"`
+	DataAtualizacao                    *time.Time `json:"data_atualizacao" db:"DATAATUALIZACAO"`
 	Transacao                          *string    `json:"transacao" db:"TRANSACAO"`
-	DataInicioEnvio                    *time.Time `json:"data_inicio_envio" db:"DATA_INICIO_ENVIO"`
+	DataInicioEnvio                    *time.Time `json:"data_inicio_envio" db:"DATAINICIOENVIO"`
 }
 
 // IntegrationProduct represents product integration data
 type IntegrationProduct struct {
-	ID             int       `json:"id" db:"ID"`
-	DataIntegracao time.Time `json:"data_integracao" db:"DATA_INTEGRACAO"`
+	IdIntegracaoProduto int        `json:"id_integracao_produto" db:"IDINTEGRACAOPRODUTO"`
+	IdRevendedor        int        `json:"id_revendedor" db:"IDREVENDEDOR"`
+	IdProduto           int        `json:"id_produto" db:"IDPRODUTO"`
+	Enviando            *string    `json:"enviando" db:"ENVIANDO"`
+	Json                string     `json:"json" db:"JSON"`
+	DataAtualizacao     *time.Time `json:"data_atualizacao" db:"DATAATUALIZACAO"`
+	Transacao           *string    `json:"transacao" db:"TRANSACAO"`
+	DataInicioEnvio     *time.Time `json:"data_inicio_envio" db:"DATAINICIOENVIO"`
 }
 
 // IntegrationPromotion represents promotion integration data
 type IntegrationPromotion struct {
-	ID             int       `json:"id" db:"ID"`
-	DataIntegracao time.Time `json:"data_integracao" db:"DATA_INTEGRACAO"`
+	IdIntegracaoPromocao int        `json:"id_integracao_promocao" db:"IDINTEGRACAOPROMOCAO"`
+	IdRevendedor         int        `json:"id_revendedor" db:"IDREVENDEDOR"`
+	IdPromocao           int        `json:"id_promocao" db:"IDPROMOCAO"`
+	Enviando             *string    `json:"enviando" db:"ENVIANDO"`
+	Json                 *string    `json:"json" db:"JSON"`
+	DataAtualizacao      *time.Time `json:"data_atualizacao" db:"DATAATUALIZACAO"`
+	Transacao            *string    `json:"transacao" db:"TRANSACAO"`
+	DataInicioEnvio      *time.Time `json:"data_inicio_envio" db:"DATAINICIOENVIO"`
 }
 
 // Network represents a network entity
@@ -97,5 +109,7 @@ type DealerNetwork struct {
 
 // ProductSelect represents a product for selection/replication
 type ProductSelect struct {
-	Cod string `json:"cod" db:"COD"`
+	Cod       string `json:"cod" db:"COD"`
+	CodigoRMS int    `json:"codigo_rms" db:"CODIGO_RMS"`
+	IdProduto int    `json:"id_produto" db:"ID_PRODUTO"`
 }
