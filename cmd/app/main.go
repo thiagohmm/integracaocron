@@ -1,10 +1,12 @@
 package main
 
 import (
+	"context"
 	"log"
 	"os"
 	"os/signal"
 	"strconv"
+	"sync"
 	"syscall"
 
 	"github.com/thiagohmm/integracaocron/configuration"
@@ -12,9 +14,12 @@ import (
 	"github.com/thiagohmm/integracaocron/domain/usecases"
 	"github.com/thiagohmm/integracaocron/infraestructure/database"
 	rabbitmq "github.com/thiagohmm/integracaocron/internal/delivery"
+	"github.com/thiagohmm/integracaocron/pkg/logger"
+	"github.com/thiagohmm/integracaocron/pkg/tracing"
 )
 
 func main() {
+	ctx := context.Background()
 	log.Println("=== Iniciando aplicação IntegracaoCron ===")
 
 	// Load configuration
@@ -23,16 +28,32 @@ func main() {
 		log.Fatalf("Erro ao carregar configuração: %v", err)
 	}
 
+	// Initialize tracing
+	err = initTracing(cfg)
+	if err != nil {
+		log.Printf("Erro ao inicializar tracing: %v", err)
+	}
+	defer func() {
+		if err := tracing.Shutdown(ctx); err != nil {
+			log.Printf("Erro ao finalizar tracing: %v", err)
+		}
+	}()
+
+	logger.Info(ctx, "Aplicação IntegracaoCron iniciada com tracing")
+
 	// Connect to database
 	db, err := database.ConectarBanco(cfg)
 	if err != nil {
+		logger.Error(ctx, "Erro ao conectar ao banco de dados: %v", err)
 		log.Fatalf("Erro ao conectar ao banco de dados: %v", err)
 	}
 	defer func() {
 		if err := db.Close(); err != nil {
-			log.Printf("Erro ao fechar conexão com o banco: %v", err)
+			logger.Error(ctx, "Erro ao fechar conexão com o banco: %v", err)
 		}
 	}()
+
+	logger.Info(ctx, "Conexão com banco de dados estabelecida")
 
 	// Initialize repositories
 	promotionRepo := repositories.NewPromotionRepository(db)
@@ -50,8 +71,11 @@ func main() {
 	// Get RabbitMQ configuration
 	rabbitmqURL := getRabbitMQURL(cfg)
 	if rabbitmqURL == "" {
+		logger.Error(ctx, "URL do RabbitMQ não configurada")
 		log.Fatal("URL do RabbitMQ não configurada")
 	}
+
+	logger.Info(ctx, "Configuração RabbitMQ carregada: %s", maskRabbitMQURL(rabbitmqURL))
 
 	// Initialize use cases
 	packagingIntegrationUC := usecases.NewPackagingIntegrationUseCase(productRepo, productPackagingRepo, unitOfMeasurementRepo, packagingIntegrationStagingRepo)
@@ -62,6 +86,7 @@ func main() {
 
 	// Get number of workers from environment or use default
 	workers := getWorkersCount()
+	logger.Info(ctx, "Número de workers configurado: %d", workers)
 
 	// Initialize RabbitMQ listener
 	listener := &rabbitmq.Listener{
@@ -72,16 +97,57 @@ func main() {
 		Workers:                  workers,
 	}
 
+	logger.Info(ctx, "Use cases inicializados com sucesso")
+
 	// Setup graceful shutdown
 	setupGracefulShutdown()
 
+	// Get HTTP port
+	httpPort := getHTTPPort(cfg)
+
+	// Start HTTP server in a goroutine
+	var wg sync.WaitGroup
+	if httpPort != "" {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			httpServer := rabbitmq.NewHTTPServer(httpPort, listener)
+			logger.Info(ctx, "Iniciando servidor HTTP na porta %s", httpPort)
+			if err := httpServer.Start(); err != nil {
+				logger.Error(ctx, "Erro no servidor HTTP: %v", err)
+			}
+		}()
+	}
+
 	// Start listening to RabbitMQ
-	log.Printf("Iniciando listener RabbitMQ com %d workers", workers)
-	log.Printf("Conectando ao RabbitMQ: %s", maskRabbitMQURL(rabbitmqURL))
+	logger.Info(ctx, "Iniciando listener RabbitMQ com %d workers", workers)
+	logger.Info(ctx, "Conectando ao RabbitMQ: %s", maskRabbitMQURL(rabbitmqURL))
 
 	if err := listener.ListenToQueue(rabbitmqURL); err != nil {
+		logger.Error(ctx, "Erro ao iniciar listener RabbitMQ: %v", err)
 		log.Fatalf("Erro ao iniciar listener RabbitMQ: %v", err)
 	}
+}
+
+// initTracing initializes distributed tracing
+func initTracing(cfg *configuration.Conf) error {
+	config := tracing.Config{
+		ServiceName:    "integracaocron",
+		ServiceVersion: "1.0.0",
+		Environment:    "production",
+		JaegerEndpoint: cfg.JaegerEndpoint,
+		Enabled:        cfg.TracingEnabled,
+		SamplingRate:   cfg.TracingSampleRate,
+	}
+
+	if config.JaegerEndpoint == "" {
+		config.JaegerEndpoint = "http://localhost:14268/api/traces"
+	}
+	if config.SamplingRate == 0 {
+		config.SamplingRate = 1.0
+	}
+
+	return tracing.InitTracer(config)
 }
 
 // loadConfiguration loads the application configuration
@@ -108,6 +174,30 @@ func getRabbitMQURL(cfg *configuration.Conf) string {
 		rabbitmqURL = cfg.ENV_RABBITMQ
 	}
 	return rabbitmqURL
+}
+
+// getHTTPPort gets HTTP port from environment or config
+func getHTTPPort(cfg *configuration.Conf) string {
+	httpPort := os.Getenv("HTTP_PORT")
+	if httpPort == "" {
+		httpPort = cfg.HTTPPort
+	}
+	if httpPort == "" {
+		httpPort = "8080" // Default port
+	}
+	return httpPort
+}
+
+// getHTTPPort gets HTTP port from environment or config
+func getHTTPPort(cfg *configuration.Conf) string {
+	httpPort := os.Getenv("HTTP_PORT")
+	if httpPort == "" {
+		httpPort = cfg.HTTPPort
+	}
+	if httpPort == "" {
+		httpPort = "8080" // Default port
+	}
+	return httpPort
 }
 
 // getWorkersCount gets the number of workers from environment or uses default

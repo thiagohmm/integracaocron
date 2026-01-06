@@ -18,6 +18,10 @@ type Conf struct {
 	ServiceName        string
 	Port               int
 	Host               string
+	HTTPPort           string `mapstructure:"HTTP_PORT"`
+	JaegerEndpoint    string `mapstructure:"JAEGER_ENDPOINT"`
+	TracingEnabled    bool   `mapstructure:"TRACING_ENABLED"`
+	TracingSampleRate float64 `mapstructure:"TRACING_SAMPLE_RATE"`
 	ENV_RABBITMQ       string `mapstructure:"ENV_RABBITMQ"`
 	ENV_REDIS_ADDR     string `mapstructure:"ENV_REDIS_ADDRESS"`
 	ENV_REDIS_PASSWORD string `mapstructure:"ENV_REDIS_PASSWORD"`
@@ -77,6 +81,10 @@ func LoadConfig(path string) (*Conf, error) {
 		cfg.ENV_REDIS_ADDR = viper.GetString("ENV_REDIS_ADDRESS")
 		cfg.ENV_REDIS_PASSWORD = viper.GetString("ENV_REDIS_PASSWORD")
 		cfg.ENV_REDIS_EXPIRE = viper.GetInt("ENV_REDIS_EXPIRE")
+		cfg.HTTPPort = viper.GetString("HTTP_PORT")
+		cfg.JaegerEndpoint = viper.GetString("JAEGER_ENDPOINT")
+		cfg.TracingEnabled = viper.GetBool("TRACING_ENABLED")
+		cfg.TracingSampleRate = viper.GetFloat64("TRACING_SAMPLE_RATE")
 	} else {
 		err = viper.Unmarshal(&cfg)
 		if err != nil {

@@ -1,6 +1,7 @@
 package rabbitmq
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,6 +14,9 @@ import (
 	"github.com/thiagohmm/integracaocron/domain/entities"
 	"github.com/thiagohmm/integracaocron/domain/usecases"
 	infraestructure "github.com/thiagohmm/integracaocron/infraestructure/rabbitmq"
+	"github.com/thiagohmm/integracaocron/pkg/logger"
+	"github.com/thiagohmm/integracaocron/pkg/tracing"
+	"go.opentelemetry.io/otel/trace"
 )
 
 type Listener struct {
@@ -226,8 +230,11 @@ func (l *Listener) worker(id int, msgs <-chan amqp.Delivery, wg *sync.WaitGroup,
 }
 
 func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
-	log.Printf("Iniciando processamento de mensagem...")
-	log.Printf("Mensagem recebida (raw): %s", string(msg.Body))
+	ctx, span := tracing.StartSpan(context.Background(), "rabbitmq.process_message")
+	defer span.End()
+
+	logger.Info(ctx, "Iniciando processamento de mensagem RabbitMQ")
+	logger.Debug(ctx, "Mensagem recebida (raw): %s", string(msg.Body))
 
 	var tipoIntegracao string
 	var dados map[string]interface{}
@@ -236,7 +243,8 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 	var message map[string]interface{}
 	if err := json.Unmarshal(msg.Body, &message); err == nil {
 		// É um JSON object válido
-		log.Printf("Mensagem parseada como JSON object")
+		logger.Debug(ctx, "Mensagem parseada como JSON object")
+		tracing.AddEvent(ctx, "message_parsed_as_json_object")
 
 		// Verifica se é o formato novo com "type_message"
 		if typeMsg, ok := message["type_message"].(string); ok {
@@ -256,7 +264,7 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 				dados = message
 			}
 		} else {
-			log.Printf("Campo 'type_message' ou 'tipoIntegracao' não encontrado no JSON object")
+			logger.Error(ctx, "Campo 'type_message' ou 'tipoIntegracao' não encontrado no JSON object")
 			return fmt.Errorf("campo 'type_message' ou 'tipoIntegracao' não encontrado no JSON object"), ""
 		}
 	} else {
@@ -285,25 +293,26 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 		}
 	}
 
-	log.Printf("Tipo de integração detectado: %s", tipoIntegracao)
+	logger.Info(ctx, "Tipo de integração detectado: %s", tipoIntegracao)
+	tracing.AddStringAttribute(ctx, "integration.type", tipoIntegracao)
 
 	switch tipoIntegracao {
-
 	case "promocao", "Promocao":
-		log.Printf("Iniciando processamento de promoção")
+		ctx, span := tracing.StartSpan(ctx, "integration.promocao")
+		defer span.End()
+		logger.Info(ctx, "Iniciando processamento de promoção")
 
 		// Check if we have specific promotion data or should process all pending
 		if len(dados) == 0 || (dados["ipm_id"] == nil && dados["IPM_ID"] == nil) {
-			// No specific promotion data, process all pending promotions from database
-			log.Printf("Nenhum dado específico de promoção fornecido, processando todas as promoções pendentes do banco")
+			logger.Info(ctx, "Nenhum dado específico de promoção fornecido, processando todas as promoções pendentes do banco")
 			err := l.PromocaoUC.ProcessarTodasPromocoesPendentes()
 			if err != nil {
-				log.Printf("Erro ao processar promoções pendentes: %v", err)
+				logger.Error(ctx, "Erro ao processar promoções pendentes: %v", err)
+				tracing.RecordError(ctx, err)
 				return fmt.Errorf("erro ao processar promoções pendentes: %w", err), ""
 			}
 		} else {
-			// Specific promotion data provided, process it
-			log.Printf("Dados específicos de promoção fornecidos, processando promoção individual")
+			logger.Info(ctx, "Dados específicos de promoção fornecidos, processando promoção individual")
 			var promocao entities.Promotion
 			promocaoBytes, err := json.Marshal(dados)
 			if err != nil {
@@ -335,10 +344,12 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 			}
 		}
 
-		log.Printf("Processamento de promoção concluído")
+		logger.Info(ctx, "Processamento de promoção concluído")
 
 	case "produto", "Produto":
-		log.Printf("Iniciando processamento de produto")
+		ctx, span := tracing.StartSpan(ctx, "integration.produto")
+		defer span.End()
+		logger.Info(ctx, "Iniciando processamento de produto")
 
 		if l.ProductIntegrationUC == nil {
 			log.Printf("ProductIntegrationUC não foi inicializado")
@@ -405,7 +416,8 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 		log.Printf("Processo ProductNetworkMain concluído com sucesso")
 
 	default:
-		log.Printf("Tipo de processo desconhecido: %s", tipoIntegracao)
+		logger.Error(ctx, "Tipo de processo desconhecido: %s", tipoIntegracao)
+		tracing.SetStatus(ctx, trace.StatusCodeError, "unknown integration type")
 		return fmt.Errorf("tipo de processo desconhecido: %s", tipoIntegracao), ""
 	}
 
