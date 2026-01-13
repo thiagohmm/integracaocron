@@ -338,7 +338,7 @@ func (uc *IntegrationJobUseCase) ReplicateNetworkProductsJob() error {
 				// The product object from the database needs to be converted to the ProductSelectIntegration struct
 				// This is a placeholder, as the actual mapping will depend on the structure of the returned product
 				productSelect := entities.ProductSelectIntegration{
-					CodRMS: fmt.Sprintf("%d", product.CodigoRMS),
+					CodRMS: entities.FlexibleString(fmt.Sprintf("%d", product.CodigoRMS)),
 					// Map other fields as necessary
 				}
 				err := uc.productIntegrationUC.IntegrateProductService(product.IdProduto, ljsItem.IdRevendedor, productSelect)

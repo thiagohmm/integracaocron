@@ -1,6 +1,36 @@
 package entities
 
-import "time"
+import (
+	"encoding/json"
+	"fmt"
+	"time"
+)
+
+// FlexibleString is a type that can unmarshal from both string and number
+type FlexibleString string
+
+func (fs *FlexibleString) UnmarshalJSON(data []byte) error {
+	// Try to unmarshal as string first
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		*fs = FlexibleString(s)
+		return nil
+	}
+
+	// Try to unmarshal as number
+	var n json.Number
+	if err := json.Unmarshal(data, &n); err == nil {
+		*fs = FlexibleString(n.String())
+		return nil
+	}
+
+	return fmt.Errorf("FlexibleString: cannot unmarshal %s", string(data))
+}
+
+// String returns the string value
+func (fs FlexibleString) String() string {
+	return string(fs)
+}
 
 // ProductInJson represents the main product integration JSON structure
 type ProductInJson struct {
@@ -13,10 +43,14 @@ type ProductSelectIntegration struct {
 	Desc      string         `json:"desc"`
 	DescEcf   string         `json:"descEcf"`
 	PitStop   string         `json:"pitstop"`
-	Subclasse string         `json:"subclasse"`
-	Nivel1    string         `json:"nivel1"`
-	Depto     string         `json:"depto"`
-	CodRMS    string         `json:"codrms"`
+	Subclasse FlexibleString `json:"subclasse"`
+	Nivel1    FlexibleString `json:"nivel1"`
+	Nivel2    FlexibleString `json:"nivel2"`
+	Nivel3    FlexibleString `json:"nivel3"`
+	Nivel4    FlexibleString `json:"nivel4"`
+	Depto     FlexibleString `json:"depto"`
+	CodRMS    FlexibleString `json:"codrms"`
+	Cod       FlexibleString `json:"cod"`
 	Status    string         `json:"status"`
 	DescMarca string         `json:"descMarca"`
 	Ind       string         `json:"ind"`
@@ -215,7 +249,6 @@ type QueueMessage struct {
 	Fields []string      `json:"fields"`
 	Values []interface{} `json:"values"`
 }
-
 
 // ProductIntegrationStaging represents the product integration staging entity
 type ProductIntegrationStaging struct {

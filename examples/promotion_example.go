@@ -49,7 +49,7 @@ func RunPromotionExample() {
 
 	// Example promotion data
 	testPromotion := entities.Promotion{
-		IPMD_ID:         123,
+		IPM_ID:          123,
 		Json:            `{"test": "data"}`,
 		DATARECEBIMENTO: "2025-10-06 12:00:00",
 	}

@@ -14,17 +14,17 @@ import (
 
 // ProductIntegrationUseCase handles product integration business logic
 type ProductIntegrationUseCase struct {
-	repo                  *repositories.ProductIntegrationRepository
-	packagingUseCase      *PackagingIntegrationUseCase
-	db                    *sql.DB
+	repo             *repositories.ProductIntegrationRepository
+	packagingUseCase *PackagingIntegrationUseCase
+	db               *sql.DB
 }
 
 // NewProductIntegrationUseCase creates a new instance of ProductIntegrationUseCase
 func NewProductIntegrationUseCase(repo *repositories.ProductIntegrationRepository, packagingUseCase *PackagingIntegrationUseCase, db *sql.DB) *ProductIntegrationUseCase {
 	return &ProductIntegrationUseCase{
-		repo:                  repo,
-		packagingUseCase:      packagingUseCase,
-		db:                    db,
+		repo:             repo,
+		packagingUseCase: packagingUseCase,
+		db:               db,
 	}
 }
 
@@ -48,15 +48,23 @@ func (uc *ProductIntegrationUseCase) IntegrateProductService(idProduto, idDealer
 	return nil
 }
 
-
 // ImportProductIntegration is the main function that imports product integrations
 func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 	log.Println("Starting product integration import process")
 
 	var success []bool
-	integrRmsProductsIn, err := uc.repo.GetIntegrRmsProductsIn()
+
+	// Get products from STAGING table, not from input table
+	productsStagingRecords, err := uc.repo.GetAllProductIntegrationStagingRecords()
 	if err != nil {
-		return false, fmt.Errorf("error getting integr rms products: %w", err)
+		return false, fmt.Errorf("error getting products from staging: %w", err)
+	}
+
+	log.Printf("Found %d product(s) to process from INTEGRACAOPRODUTOSTAGING", len(productsStagingRecords))
+
+	if len(productsStagingRecords) == 0 {
+		log.Println("No products found to process in staging table. Exiting.")
+		return true, nil
 	}
 
 	// Begin transaction
@@ -71,57 +79,99 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 		}
 	}()
 
-	for _, rms := range integrRmsProductsIn {
-		result := uc.processProductIntegration(rms)
+	for i, stagingRecord := range productsStagingRecords {
+		// Wrap each product processing in a func to catch panics
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("PANIC recovered while processing product %d/%d (Staging ID: %d): %v", 
+						i+1, len(productsStagingRecords), stagingRecord.IdIntegrationProdutoStaging, r)
+					success = append(success, false)
+					
+					// Log panic error
+					logErro := entities.QueueMessage{
+						Tabela: "LogIntegrRMS",
+						Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
+						Values: []interface{}{
+							"STAGING",
+							"PRODUTOS",
+							stagingRecord.DataAtualizacao,
+							time.Now(),
+							0, // Status 0 = error
+							stagingRecord.Json,
+							fmt.Sprintf("PANIC: %v", r),
+						},
+					}
+					uc.repo.SendToQueue(logErro)
+				}
+			}()
 
-		logErro := entities.QueueMessage{
-			Tabela: "LogIntegrRMS",
-			Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
-			Values: []interface{}{
-				"IN",
-				"PRODUTOS",
-				rms.DataRecebimento,
-				time.Now(),
-				uc.getStatusFromResult(result),
-				uc.marshalRMS(rms),
-				uc.getMessageFromResult(result),
-			},
-		}
+			log.Printf("Processing product %d/%d (Staging ID: %d, Product ID: %d, Dealer ID: %d)",
+				i+1, len(productsStagingRecords),
+				stagingRecord.IdIntegrationProdutoStaging,
+				stagingRecord.IdProduto,
+				stagingRecord.IdRevendedor)
 
-		// Send to queue (logging mechanism)
-		if err := uc.repo.SendToQueue(logErro); err != nil {
-			log.Printf("Error sending log to queue: %v", err)
-		}
+			result := uc.processProductFromStaging(stagingRecord)
+			log.Printf("Product %d processing result - Success: %v, Message: %s", i+1, result.Success, result.Message)
 
-		if result.Success {
-			success = append(success, true)
-			if err := uc.repo.RemoveProductService(rms); err != nil {
-				log.Printf("Error removing product service: %v", err)
+			logErro := entities.QueueMessage{
+				Tabela: "LogIntegrRMS",
+				Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
+				Values: []interface{}{
+					"STAGING",
+					"PRODUTOS",
+					stagingRecord.DataAtualizacao,
+					time.Now(),
+					uc.getStatusFromResult(result),
+					stagingRecord.Json,
+					uc.getMessageFromResult(result),
+				},
+			}
+
+			// Send to queue (logging mechanism)
+			if err := uc.repo.SendToQueue(logErro); err != nil {
+				log.Printf("Error sending log to queue: %v", err)
+			}
+
+			if result.Success {
+				success = append(success, true)
+				log.Printf("✅ Product %d processed successfully from INTEGRACAOPRODUTOSTAGING", i+1)
+			} else {
 				success = append(success, false)
+				log.Printf("❌ Product %d processing FAILED: %s", i+1, result.Message)
+				log.Printf("⏩ Continuing to next product...")
 			}
-		} else {
-			success = append(success, false)
-			// Still remove the record even if processing failed to avoid infinite loops
-			if err := uc.repo.RemoveProductService(rms); err != nil {
-				log.Printf("Error removing failed product service: %v", err)
-			}
-		}
+		}()
 	}
 
 	if err := tx.Commit(); err != nil {
 		return false, fmt.Errorf("error committing transaction: %w", err)
 	}
 
-	// Check if any processing failed
-	isFalse := false
+	// Calculate success/failure summary
+	totalProducts := len(productsStagingRecords)
+	successCount := 0
+	failureCount := 0
+	
 	for _, val := range success {
-		if !val {
-			isFalse = true
-			break
+		if val {
+			successCount++
+		} else {
+			failureCount++
 		}
 	}
 
-	return !isFalse, nil
+	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	log.Printf("📊 PRODUCT INTEGRATION SUMMARY")
+	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+	log.Printf("   Total Products:     %d", totalProducts)
+	log.Printf("   ✅ Successful:      %d (%.1f%%)", successCount, float64(successCount)/float64(totalProducts)*100)
+	log.Printf("   ❌ Failed:          %d (%.1f%%)", failureCount, float64(failureCount)/float64(totalProducts)*100)
+	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+
+	// Return true if at least one product succeeded
+	return successCount > 0, nil
 }
 
 // processProductIntegration processes a single product integration
@@ -135,28 +185,93 @@ func (uc *ProductIntegrationUseCase) processProductIntegration(rms entities.Inte
 	// Parse JSON
 	var produto entities.ProductInJson
 	if err := json.Unmarshal([]byte(rms.JSON), &produto); err != nil {
+		log.Printf("ERROR: Failed to parse JSON for IPR_ID %v: %v", rms.IprID, err)
 		return &entities.LogValidate{
 			Success: false,
 			Message: fmt.Sprintf("Error parsing JSON: %v", err),
 		}
 	}
 
+	log.Printf("JSON parsed successfully for IPR_ID %v, calling Oracle procedure pkg_integra_produto.prc_integra_hermes", rms.IprID)
+
 	// Call Oracle stored procedure to handle the integration
 	if rms.IprID != nil {
 		result, err := uc.repo.DoPackageProductIntegration(*rms.IprID)
 		if err != nil {
+			log.Printf("ERROR: Oracle procedure failed for IPR_ID %v: %v", rms.IprID, err)
 			return &entities.LogValidate{
 				Success: false,
 				Message: fmt.Sprintf("Error executing Oracle procedure: %v", err),
 			}
 		}
+		log.Printf("Oracle procedure completed for IPR_ID %v - Success: %v, Message: %s", rms.IprID, result.Success, result.Message)
 		return result
 	}
 
+	log.Printf("ERROR: Invalid IPR_ID (nil) for product")
 	return &entities.LogValidate{
 		Success: false,
 		Message: "Invalid IPR_ID",
 	}
+}
+
+// processProductFromStaging processes a single product from staging table
+func (uc *ProductIntegrationUseCase) processProductFromStaging(stagingRecord entities.ProductIntegrationStaging) *entities.LogValidate {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("Panic recovered in processProductFromStaging: %v", r)
+		}
+	}()
+
+	log.Printf("Processing staging record - ID: %d, Product ID: %d, Dealer ID: %d",
+		stagingRecord.IdIntegrationProdutoStaging,
+		stagingRecord.IdProduto,
+		stagingRecord.IdRevendedor)
+
+	// Parse JSON from staging into ProductSelectIntegration
+	var productSelect entities.ProductSelectIntegration
+	if err := json.Unmarshal([]byte(stagingRecord.Json), &productSelect); err != nil {
+		log.Printf("ERROR: Failed to parse JSON from staging ID %d into ProductSelectIntegration: %v", stagingRecord.IdIntegrationProdutoStaging, err)
+		return &entities.LogValidate{
+			Success: false,
+			Message: fmt.Sprintf("Error parsing JSON from staging: %v", err),
+		}
+	}
+
+	// Construct ProductInJson from ProductSelectIntegration and other staging data
+	// This mirrors the structure expected by getNewProduct
+	productInJson := entities.ProductInJson{
+		ProdutosSelect: []entities.ProductSelectIntegration{productSelect},
+		Pesavel:        productSelect.Pesavel, // Assuming pesavel is part of ProductSelectIntegration or derivable
+	}
+
+	log.Printf("JSON parsed successfully from staging, calling getNewProduct for Product ID: %d", stagingRecord.IdProduto)
+
+	// Call getNewProduct to process the product
+	validationResult, err := uc.getNewProduct(productInJson)
+	if err != nil {
+		log.Printf("ERROR: getNewProduct failed for staging ID %d: %v", stagingRecord.IdIntegrationProdutoStaging, err)
+		return &entities.LogValidate{
+			Success: false,
+			Message: fmt.Sprintf("Error processing product with getNewProduct: %v", err),
+		}
+	}
+
+	if validationResult.Success {
+		log.Printf("Product from staging processed successfully - Product ID: %d, Dealer ID: %d. Removing from staging.", stagingRecord.IdProduto, stagingRecord.IdRevendedor)
+		// Remove from staging after successful processing
+		err := uc.repo.RemoveProductIntegrationStagingRecord(stagingRecord.IdIntegrationProdutoStaging)
+		if err != nil {
+			log.Printf("ERROR: Failed to remove staging record %d: %v", stagingRecord.IdIntegrationProdutoStaging, err)
+			// Log the error but still return success for the product processing itself
+			return &entities.LogValidate{
+				Success: true,
+				Message: fmt.Sprintf("Product processed, but failed to remove from staging: %v", err),
+			}
+		}
+	}
+
+	return validationResult
 }
 
 // getNewProduct processes and validates product data (commented out equivalent to TypeScript version)
@@ -241,27 +356,31 @@ func (uc *ProductIntegrationUseCase) createNewProductFromSelect(produtoSelect en
 	}
 
 	// Set structure IDs
-	if produtoSelect.Subclasse != "" {
-		if val, err := strconv.Atoi(produtoSelect.Subclasse); err == nil {
+	if produtoSelect.Subclasse.String() != "" {
+		if val, err := strconv.Atoi(produtoSelect.Subclasse.String()); err == nil {
 			newProduct.IdEstruturaMercadologica = &val
 		}
 	}
 
-	if produtoSelect.Nivel1 != "" {
-		if val, err := strconv.Atoi(produtoSelect.Nivel1); err == nil {
+	if produtoSelect.Nivel1.String() != "" {
+		if val, err := strconv.Atoi(produtoSelect.Nivel1.String()); err == nil {
 			newProduct.IdNivel1EstrMerc = &val
 		}
 	}
 
-	if produtoSelect.Depto != "" {
-		if val, err := strconv.Atoi(produtoSelect.Depto); err == nil {
+	if produtoSelect.Depto.String() != "" {
+		if val, err := strconv.Atoi(produtoSelect.Depto.String()); err == nil {
 			newProduct.IdNivel2EstrMerc = &val
 		}
 	}
 
-	// Set RMS Code
-	if produtoSelect.CodRMS != "" {
-		if val, err := strconv.Atoi(produtoSelect.CodRMS); err == nil {
+	// Set RMS Code - try both cod and codrms fields
+	codigoRMS := produtoSelect.CodRMS.String()
+	if codigoRMS == "" {
+		codigoRMS = produtoSelect.Cod.String()
+	}
+	if codigoRMS != "" {
+		if val, err := strconv.Atoi(codigoRMS); err == nil {
 			newProduct.CodigoRMS = &val
 		}
 	}
@@ -465,10 +584,11 @@ func (uc *ProductIntegrationUseCase) processProduct(newProduct *entities.Product
 		return fmt.Errorf("código RMS é obrigatório")
 	}
 
-	// Check if product exists
+	var productID int
+	// Check if product exists by RMS Code
 	existingProduct, err := uc.repo.GetProductByCodeRMS(*newProduct.CodigoRMS)
 	if err != nil {
-		return fmt.Errorf("error checking existing product: %w", err)
+		return fmt.Errorf("error checking existing product by RMS code: %w", err)
 	}
 
 	var codigoBarrasPrinc string
@@ -479,7 +599,7 @@ func (uc *ProductIntegrationUseCase) processProduct(newProduct *entities.Product
 		}
 	}
 
-	// If product doesn't exist, check by barcode
+	// If product doesn't exist by RMS code, check by primary barcode
 	if existingProduct == nil && codigoBarrasPrinc != "" {
 		embProduct, err := uc.repo.GetProductPackagingByBarCode(codigoBarrasPrinc)
 		if err != nil {
@@ -496,12 +616,36 @@ func (uc *ProductIntegrationUseCase) processProduct(newProduct *entities.Product
 
 	if newProduct.IdMarca != nil {
 		if existingProduct == nil {
-			// Insert new product - this would need actual implementation
-			log.Printf("Would insert new product with RMS code: %d", *newProduct.CodigoRMS)
+			// Insert new product
+			log.Printf("Inserting new product with RMS code: %d", *newProduct.CodigoRMS)
+			newProductID, err := uc.repo.InsertProduct(newProduct)
+			if err != nil {
+				return fmt.Errorf("error inserting new product: %w", err)
+			}
+			productID = newProductID
 		} else {
-			// Update existing product - this would need actual implementation
+			// Update existing product
 			newProduct.IdProduto = existingProduct.IdProduto
-			log.Printf("Would update existing product with ID: %d", *newProduct.IdProduto)
+			log.Printf("Updating existing product with ID: %d", *newProduct.IdProduto)
+			err := uc.repo.UpdateProduct(newProduct)
+			if err != nil {
+				return fmt.Errorf("error updating product %d: %w", *newProduct.IdProduto, err)
+			}
+			productID = *newProduct.IdProduto
+		}
+	} else {
+		return fmt.Errorf("ID da marca é obrigatório")
+	}
+
+	// After successful insert/update, ensure DiretorioAnexo is set correctly
+	directorioAnexo := fmt.Sprintf("P%d", productID)
+	newProduct.DiretorioAnexo = directorioAnexo
+
+	// Re-update the product to set DiretorioAnexo if it was just inserted
+	if existingProduct == nil {
+		err := uc.repo.UpdateProduct(newProduct)
+		if err != nil {
+			return fmt.Errorf("error updating product directory annex for product %d: %w", productID, err)
 		}
 	}
 

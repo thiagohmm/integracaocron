@@ -23,11 +23,11 @@ func NewProductIntegrationRepository(db *sql.DB) *ProductIntegrationRepository {
 
 // GetIntegrRmsProductsIn retrieves all pending RMS product integrations
 func (r *ProductIntegrationRepository) GetIntegrRmsProductsIn() ([]entities.IntegrRmsProductIn, error) {
-	query := `SELECT IPR_ID, JSON, DATARECEBIMENTO FROM INTEGR_RMS_PRODUTO_IN ORDER BY DATARECEBIMENTO ASC`
+	query := `SELECT IPR_ID, JSON, DATARECEBIMENTO FROM INTEGRRMSPRODUTOIN ORDER BY DATARECEBIMENTO ASC`
 
 	rows, err := r.db.Query(query)
 	if err != nil {
-		return nil, fmt.Errorf("error querying integr_rms_produto_in: %w", err)
+		return nil, fmt.Errorf("error querying integrrmsprodutoin: %w", err)
 	}
 	defer rows.Close()
 
@@ -46,7 +46,7 @@ func (r *ProductIntegrationRepository) GetIntegrRmsProductsIn() ([]entities.Inte
 
 // RemoveProductService removes a processed product integration record
 func (r *ProductIntegrationRepository) RemoveProductService(rms entities.IntegrRmsProductIn) error {
-	query := `DELETE FROM INTEGR_RMS_PRODUTO_IN WHERE IPR_ID = :1`
+	query := `DELETE FROM INTEGRRMSPRODUTOIN WHERE IPR_ID = :1`
 	_, err := r.db.Exec(query, rms.IprID)
 	if err != nil {
 		return fmt.Errorf("error removing product service: %w", err)
@@ -300,14 +300,19 @@ func (r *ProductIntegrationRepository) GetBrandDescByID(id *int) ([]entities.Bra
 func (r *ProductIntegrationRepository) DoPackageProductIntegration(iprID int) (*entities.LogValidate, error) {
 	query := `BEGIN pkg_integra_produto.prc_integra_hermes(:1); END;`
 
-	_, err := r.db.Exec(query, iprID)
+	log.Printf("Executing Oracle procedure: pkg_integra_produto.prc_integra_hermes with IPR_ID: %d", iprID)
+
+	result, err := r.db.Exec(query, iprID)
 	if err != nil {
-		log.Printf("Error executing pkg_integra_produto.prc_integra_hermes: %v", err)
+		log.Printf("ERROR executing pkg_integra_produto.prc_integra_hermes for IPR_ID %d: %v", iprID, err)
 		return &entities.LogValidate{
 			Success: false,
 			Message: err.Error(),
 		}, nil
 	}
+
+	rowsAffected, _ := result.RowsAffected()
+	log.Printf("Oracle procedure executed successfully for IPR_ID %d (rows affected: %d)", iprID, rowsAffected)
 
 	return &entities.LogValidate{
 		Success: true,
@@ -399,13 +404,13 @@ func (r *ProductIntegrationRepository) ValidateBrandDesc(descMarca string) *enti
 // AddOrUpdateStaging adds or updates a product integration staging record
 func (r *ProductIntegrationRepository) AddOrUpdateStaging(idProduto, idDealer int, jsonPayload string) error {
 	query := `
-		MERGE INTO PRODUTO_INTEGRACAO_STAGING dest
-		USING (SELECT :idProduto AS ID_PRODUTO, :idDealer AS ID_REVENDEDOR FROM dual) src
-		ON (dest.ID_PRODUTO = src.ID_PRODUTO AND dest.ID_REVENDEDOR = src.ID_REVENDEDOR)
+		MERGE INTO INTEGRACAOPRODUTOSTAGING dest
+		USING (SELECT :idProduto AS IDPRODUTO, :idDealer AS IDREVENDEDOR FROM dual) src
+		ON (dest.IDPRODUTO = src.IDPRODUTO AND dest.IDREVENDEDOR = src.IDREVENDEDOR)
 		WHEN MATCHED THEN
-			UPDATE SET dest.JSON = :jsonPayload, dest.DATA_ATUALIZACAO = SYSDATE
+			UPDATE SET dest.JSON = :jsonPayload, dest.DATAATUALIZACAO = SYSDATE
 		WHEN NOT MATCHED THEN
-			INSERT (ID_PRODUTO, ID_REVENDEDOR, JSON, DATA_ATUALIZACAO)
+			INSERT (IDPRODUTO, IDREVENDEDOR, JSON, DATAATUALIZACAO)
 			VALUES (:idProduto, :idDealer, :jsonPayload, SYSDATE)
 	`
 	_, err := r.db.Exec(query, idProduto, idDealer, jsonPayload)
@@ -430,11 +435,121 @@ func (r *ProductIntegrationRepository) ValidateIndustry(industry string) *entiti
 	}
 }
 
-// GetAllProductIntegrationStagingRecords retrieves all records from PRODUTO_INTEGRACAO_STAGING
+// InsertProduct inserts a new product into the database
+func (r *ProductIntegrationRepository) InsertProduct(product *entities.ProductNew) (int, error) {
+	query := `INSERT INTO PRODUTO (
+		DESCRICAO_PRODUTO, DESCRICAO_CUPOM, PITSTOP, ID_ESTRUTURA_MERCADOLOGICA, 
+		ID_NIVEL1_ESTR_MERC, ID_NIVEL2_ESTR_MERC, ID_NIVEL3_ESTR_MERC, NOTABILIDADE, 
+		CODIGO_RMS, ATIVO, MARKUP, PERIODO_SHELF_LIFE, SHELF_LIFE, TIPO_PRODUTO, PRODUCAO, 
+		PRODU_DATA_ULTIMA_ATUALIZACAO, ID_MARCA, CONTEUDO_EMBALAGEM, FORA_MIX, REGIONAL, 
+		ID_UNIDADE_MEDIDA, DIRETORIO_ANEXO, GIFT, OBSERVACAO, REFERENCIA_FABRICANTE
+	) VALUES (
+		:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, :18, :19, :20, :21, :22, :23, :24, :25
+	) RETURNING ID_PRODUTO INTO :26`
+
+	var newProductID int
+	_, err := r.db.Exec(query,
+		product.DescricaoProduto, product.DescricaoCupom, product.PitStop, product.IdEstruturaMercadologica,
+		product.IdNivel1EstrMerc, product.IdNivel2EstrMerc, product.IdNivel3EstrMerc, product.Notabilidade,
+		product.CodigoRMS, product.Ativo, product.MarkUp, product.PeriodoShelfLife, product.ShelfLife, product.TipoProduto, product.Producao,
+		product.DataUltimaAtualizacao, product.IdMarca, product.ConteudoEmbalagem, product.ForaMix, product.Regional,
+		product.IdUnidadeMedida, product.DiretorioAnexo, product.Gift, product.Observacao, product.ReferenciaFabricante,
+		sql.Out{Dest: &newProductID},
+	)
+	if err != nil {
+		return 0, fmt.Errorf("error inserting product: %w", err)
+	}
+
+	// Insert packaging
+	for _, pkg := range product.Embalagens {
+		err := r.InsertProductPackaging(newProductID, pkg)
+		if err != nil {
+			return 0, fmt.Errorf("error inserting product packaging for new product %d: %w", newProductID, err)
+		}
+	}
+
+	return newProductID, nil
+}
+
+// UpdateProduct updates an existing product in the database
+func (r *ProductIntegrationRepository) UpdateProduct(product *entities.ProductNew) error {
+	query := `UPDATE PRODUTO SET
+		DESCRICAO_PRODUTO = :1, DESCRICAO_CUPOM = :2, PITSTOP = :3, ID_ESTRUTURA_MERCADOLOGICA = :4, 
+		ID_NIVEL1_ESTR_MERC = :5, ID_NIVEL2_ESTR_MERC = :6, ID_NIVEL3_ESTR_MERC = :7, NOTABILIDADE = :8, 
+		CODIGO_RMS = :9, ATIVO = :10, MARKUP = :11, PERIODO_SHELF_LIFE = :12, SHELF_LIFE = :13, TIPO_PRODUTO = :14, PRODUCAO = :15, 
+		PRODU_DATA_ULTIMA_ATUALIZACAO = :16, ID_MARCA = :17, CONTEUDO_EMBALAGEM = :18, FORA_MIX = :19, REGIONAL = :20, 
+		ID_UNIDADE_MEDIDA = :21, DIRETORIO_ANEXO = :22, GIFT = :23, OBSERVACAO = :24, REFERENCIA_FABRICANTE = :25
+	WHERE ID_PRODUTO = :26`
+
+	_, err := r.db.Exec(query,
+		product.DescricaoProduto, product.DescricaoCupom, product.PitStop, product.IdEstruturaMercadologica,
+		product.IdNivel1EstrMerc, product.IdNivel2EstrMerc, product.IdNivel3EstrMerc, product.Notabilidade,
+		product.CodigoRMS, product.Ativo, product.MarkUp, product.PeriodoShelfLife, product.ShelfLife, product.TipoProduto, product.Producao,
+		product.DataUltimaAtualizacao, product.IdMarca, product.ConteudoEmbalagem, product.ForaMix, product.Regional,
+		product.IdUnidadeMedida, product.DiretorioAnexo, product.Gift, product.Observacao, product.ReferenciaFabricante,
+		product.IdProduto,
+	)
+	if err != nil {
+		return fmt.Errorf("error updating product %d: %w", *product.IdProduto, err)
+	}
+
+	// Update packaging: delete existing and insert new ones
+	err = r.DeleteProductPackagingByProductID(*product.IdProduto)
+	if err != nil {
+		return fmt.Errorf("error deleting old packaging for product %d: %w", *product.IdProduto, err)
+	}
+
+	for _, pkg := range product.Embalagens {
+		err := r.InsertProductPackaging(*product.IdProduto, pkg)
+		if err != nil {
+			return fmt.Errorf("error inserting new packaging for product %d: %w", *product.IdProduto, err)
+		}
+	}
+
+	return nil
+}
+
+// InsertProductPackaging inserts a new product packaging record
+func (r *ProductIntegrationRepository) InsertProductPackaging(productID int, pkg entities.ProductPackaging) error {
+	query := `INSERT INTO EMBALAGEM_PRODUTO (
+		ID_PRODUTO, CODIGO_BARRAS, PRINCIPAL, QUANTIDADE_EMBALAGEM, ID_UNIDADE_MEDIDA, TIPO_CODIGO_BARRAS
+	) VALUES (
+		:1, :2, :3, :4, :5, :6
+	)`
+	_, err := r.db.Exec(query,
+		productID, pkg.CodigoBarras, pkg.Principal, pkg.QuantidadeEmbalagem, pkg.IdUnidadeMedida, pkg.TipoCodigoBarras,
+	)
+	if err != nil {
+		return fmt.Errorf("error inserting product packaging: %w", err)
+	}
+	return nil
+}
+
+// DeleteProductPackagingByProductID deletes all packaging records for a given product ID
+func (r *ProductIntegrationRepository) DeleteProductPackagingByProductID(productID int) error {
+	query := `DELETE FROM EMBALAGEM_PRODUTO WHERE ID_PRODUTO = :1`
+	_, err := r.db.Exec(query, productID)
+	if err != nil {
+		return fmt.Errorf("error deleting product packaging by product ID %d: %w", productID, err)
+	}
+	return nil
+}
+
+// RemoveProductIntegrationStagingRecord removes a product integration staging record by ID
+func (r *ProductIntegrationRepository) RemoveProductIntegrationStagingRecord(id int) error {
+	query := `DELETE FROM INTEGRACAOPRODUTOSTAGING WHERE IDINTEGRACAOPRODUTOSTAGING = :1`
+	_, err := r.db.Exec(query, id)
+	if err != nil {
+		return fmt.Errorf("error removing product integration staging record %d: %w", id, err)
+	}
+	return nil
+}
+
+// GetAllProductIntegrationStagingRecords retrieves all records from INTEGRACAOPRODUTOSTAGING
 func (r *ProductIntegrationRepository) GetAllProductIntegrationStagingRecords() ([]entities.ProductIntegrationStaging, error) {
-	query := `SELECT ID_INTEGRACAO_PRODUTO_STAGING, ID_PRODUTO, ID_REVENDEDOR, JSON, DATA_ATUALIZACAO
-			  FROM PRODUTO_INTEGRACAO_STAGING
-			  ORDER BY ID_INTEGRACAO_PRODUTO_STAGING ASC`
+	query := `SELECT IDINTEGRACAOPRODUTOSTAGING, IDPRODUTO, IDREVENDEDOR, JSON, DATAATUALIZACAO
+			  FROM INTEGRACAOPRODUTOSTAGING
+			  ORDER BY IDINTEGRACAOPRODUTOSTAGING ASC`
 
 	rows, err := r.db.Query(query)
 	if err != nil {

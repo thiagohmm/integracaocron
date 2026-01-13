@@ -39,15 +39,24 @@ func RunCompleteIntegrationExample() {
 		rabbitmqURL = cfg.ENV_RABBITMQ
 	}
 
+	// Create product integration use case (placeholder required by integration job)
+	productIntegrationRepo := repositories.NewProductIntegrationRepository(db)
+	productRepo := repositories.NewProductRepository(db)
+	productPackagingRepo := repositories.NewProductPackagingRepository(db)
+	unitOfMeasurementRepo := repositories.NewUnitOfMeasurementRepository(db)
+	packagingStagingRepo := repositories.NewPackagingIntegrationStagingRepository(db)
+	packagingIntegrationUC := usecases.NewPackagingIntegrationUseCase(productRepo, productPackagingRepo, unitOfMeasurementRepo, packagingStagingRepo)
+	productIntegrationUC := usecases.NewProductIntegrationUseCase(productIntegrationRepo, packagingIntegrationUC, db)
+	
 	// Create integration job use case
-	integrationJobUC := usecases.NewIntegrationJobUseCase(parameterRepo, integrationRepo, networkRepo, db)
+	integrationJobUC := usecases.NewIntegrationJobUseCase(parameterRepo, integrationRepo, networkRepo, productIntegrationUC, db)
 
 	// Create promotion use case with integration job
 	promotionUC := usecases.NewPromotionUseCase(promotionRepo, rabbitmqURL, integrationJobUC)
 
 	// Example promotion data
 	testPromotion := entities.Promotion{
-		IPMD_ID:         123,
+		IPM_ID:          123,
 		Json:            `{"descricao": "Promoção teste", "desconto": 10}`,
 		DATARECEBIMENTO: time.Now().Format("2006-01-02 15:04:05"),
 	}

@@ -27,9 +27,16 @@ func RunProductIntegrationService() {
 
 	// Initialize repositories
 	productIntegrationRepo := repositories.NewProductIntegrationRepository(db)
+	productRepo := repositories.NewProductRepository(db)
+	productPackagingRepo := repositories.NewProductPackagingRepository(db)
+	unitOfMeasurementRepo := repositories.NewUnitOfMeasurementRepository(db)
+	packagingStagingRepo := repositories.NewPackagingIntegrationStagingRepository(db)
+
+	// Initialize packaging use case
+	packagingIntegrationUC := usecases.NewPackagingIntegrationUseCase(productRepo, productPackagingRepo, unitOfMeasurementRepo, packagingStagingRepo)
 
 	// Initialize use cases
-	productIntegrationUC := usecases.NewProductIntegrationUseCase(productIntegrationRepo, db)
+	productIntegrationUC := usecases.NewProductIntegrationUseCase(productIntegrationRepo, packagingIntegrationUC, db)
 
 	// For complete setup, you would also initialize:
 	// parameterRepo := repositories.NewParameterRepository(db)
@@ -80,7 +87,13 @@ func testProductIntegration() {
 
 	// Initialize repository and use case
 	productIntegrationRepo := repositories.NewProductIntegrationRepository(db)
-	productIntegrationUC := usecases.NewProductIntegrationUseCase(productIntegrationRepo, db)
+	productRepo := repositories.NewProductRepository(db)
+	productPackagingRepo := repositories.NewProductPackagingRepository(db)
+	unitOfMeasurementRepo := repositories.NewUnitOfMeasurementRepository(db)
+	packagingStagingRepo := repositories.NewPackagingIntegrationStagingRepository(db)
+	
+	packagingIntegrationUC := usecases.NewPackagingIntegrationUseCase(productRepo, productPackagingRepo, unitOfMeasurementRepo, packagingStagingRepo)
+	productIntegrationUC := usecases.NewProductIntegrationUseCase(productIntegrationRepo, packagingIntegrationUC, db)
 
 	// Run product integration
 	success, err := productIntegrationUC.ImportProductIntegration()
@@ -106,6 +119,6 @@ Message Format for Product Integration:
   }
 }
 
-The actual product data is read from the INTEGR_RMS_PRODUTO_IN table,
+The actual product data is read from the INTEGRRMSPRODUTOIN table,
 not from the RabbitMQ message itself. The message just triggers the integration process.
 */
