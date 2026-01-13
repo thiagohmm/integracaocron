@@ -142,7 +142,35 @@ internal/
 - **Estrutura Mercadológica** (`tipoIntegracao: "EstruturaMercadologica"`)
 - **Produtos** (`tipoIntegracao: "Produtos"`)
 
-## 🔍 Monitoramento
+## 🔍 Monitoramento e Observabilidade
+
+### Jaeger Tracing
+A aplicação suporta distributed tracing com Jaeger para monitoramento e debugging.
+
+#### Configuração do Jaeger
+```bash
+# No arquivo .env
+JAEGER_ENDPOINT=http://localhost:14268/api/traces
+TRACING_ENABLED=true
+TRACING_SAMPLE_RATE=1.0
+```
+
+#### Executar Jaeger com Docker
+```bash
+# Subir apenas o Jaeger
+docker run -d --name jaeger \
+  -p 16686:16686 \
+  -p 14268:14268 \
+  jaegertracing/all-in-one:latest
+
+# Ou usar o docker-compose completo
+docker-compose -f docker-compose.jaeger.yml up -d
+```
+
+#### Acessar Jaeger UI
+- URL: http://localhost:16686
+- Visualizar traces da aplicação `integracaocron`
+- Analisar performance e logs integrados
 
 ### Logs da aplicação
 ```bash

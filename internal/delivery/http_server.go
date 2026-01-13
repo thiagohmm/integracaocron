@@ -2,7 +2,6 @@ package rabbitmq
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"time"
 

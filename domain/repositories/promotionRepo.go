@@ -116,3 +116,34 @@ func (r *PromotionRepositoryImpl) DeletePorObjeto(ipmID int) error {
 	log.Printf("Promoção %d deletada com sucesso", ipmID)
 	return nil
 }
+
+// GetAllPromotionIntegrationStagingRecords retrieves all records from PROMOCAO_INTEGRACAO_STAGING
+func (r *PromotionRepositoryImpl) GetAllPromotionIntegrationStagingRecords() ([]entities.PromotionIntegrationStaging, error) {
+	query := `SELECT ID_INTEGRACAO_PROMOCAO_STAGING, ID_PROMOCAO, ID_REVENDEDOR, JSON, DATA_ATUALIZACAO
+			  FROM PROMOCAO_INTEGRACAO_STAGING
+			  ORDER BY ID_INTEGRACAO_PROMOCAO_STAGING ASC`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("error querying promotion integration staging records: %w", err)
+	}
+	defer rows.Close()
+
+	var results []entities.PromotionIntegrationStaging
+	for rows.Next() {
+		var record entities.PromotionIntegrationStaging
+		err := rows.Scan(
+			&record.IdIntegracaoPromocaoStaging,
+			&record.IdPromocao,
+			&record.IdRevendedor,
+			&record.Json,
+			&record.DataAtualizacao,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning promotion integration staging record: %w", err)
+		}
+		results = append(results, record)
+	}
+
+	return results, nil
+}

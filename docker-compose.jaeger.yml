@@ -1,0 +1,55 @@
+version: '3.8'
+
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # Jaeger collector HTTP
+      - "14250:14250"  # Jaeger collector gRPC
+      - "6831:6831/udp"  # Jaeger agent UDP
+      - "6832:6832/udp"  # Jaeger agent UDP
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+    networks:
+      - integracaocron-network
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: rabbitmq
+    ports:
+      - "5672:5672"   # RabbitMQ
+      - "15672:15672" # RabbitMQ Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: admin
+      RABBITMQ_DEFAULT_PASS: admin123
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - integracaocron-network
+
+  integracaocron:
+    build: .
+    container_name: integracaocron
+    depends_on:
+      - jaeger
+      - rabbitmq
+    environment:
+      - ENV_RABBITMQ=amqp://admin:admin123@rabbitmq:5672/
+      - JAEGER_ENDPOINT=http://jaeger:14268/api/traces
+      - TRACING_ENABLED=true
+      - TRACING_SAMPLE_RATE=1.0
+      - HTTP_PORT=8080
+      - WORKERS=20
+    ports:
+      - "8080:8080"
+    networks:
+      - integracaocron-network
+
+volumes:
+  rabbitmq_data:
+
+networks:
+  integracaocron-network:
+    driver: bridge

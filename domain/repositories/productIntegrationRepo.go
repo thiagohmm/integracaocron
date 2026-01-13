@@ -228,6 +228,7 @@ func (r *ProductIntegrationRepository) GetProductPackagingByBarCode(barCode stri
 
 	return &pkg, nil
 }
+
 // GetDepartmentNameByID retrieves department name by ID
 func (r *ProductIntegrationRepository) GetDepartmentNameByID(id *int) (string, error) {
 	if id == nil {
@@ -395,7 +396,6 @@ func (r *ProductIntegrationRepository) ValidateBrandDesc(descMarca string) *enti
 	}
 }
 
-
 // AddOrUpdateStaging adds or updates a product integration staging record
 func (r *ProductIntegrationRepository) AddOrUpdateStaging(idProduto, idDealer int, jsonPayload string) error {
 	query := `
@@ -428,4 +428,35 @@ func (r *ProductIntegrationRepository) ValidateIndustry(industry string) *entiti
 		Success: true,
 		Message: "Indústria válida",
 	}
+}
+
+// GetAllProductIntegrationStagingRecords retrieves all records from PRODUTO_INTEGRACAO_STAGING
+func (r *ProductIntegrationRepository) GetAllProductIntegrationStagingRecords() ([]entities.ProductIntegrationStaging, error) {
+	query := `SELECT ID_INTEGRACAO_PRODUTO_STAGING, ID_PRODUTO, ID_REVENDEDOR, JSON, DATA_ATUALIZACAO
+			  FROM PRODUTO_INTEGRACAO_STAGING
+			  ORDER BY ID_INTEGRACAO_PRODUTO_STAGING ASC`
+
+	rows, err := r.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("error querying product integration staging records: %w", err)
+	}
+	defer rows.Close()
+
+	var results []entities.ProductIntegrationStaging
+	for rows.Next() {
+		var record entities.ProductIntegrationStaging
+		err := rows.Scan(
+			&record.IdIntegrationProdutoStaging,
+			&record.IdProduto,
+			&record.IdRevendedor,
+			&record.Json,
+			&record.DataAtualizacao,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("error scanning product integration staging record: %w", err)
+		}
+		results = append(results, record)
+	}
+
+	return results, nil
 }

@@ -7,6 +7,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/jaeger"
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
@@ -51,18 +52,12 @@ func InitTracer(config Config) error {
 	}
 
 	// Create resource with service information
-	res, err := resource.Merge(
-		resource.Default(),
-		resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceName(config.ServiceName),
-			semconv.ServiceVersion(config.ServiceVersion),
-			attribute.String("environment", config.Environment),
-		),
+	res := resource.NewWithAttributes(
+		semconv.SchemaURL,
+		semconv.ServiceName(config.ServiceName),
+		semconv.ServiceVersion(config.ServiceVersion),
+		attribute.String("environment", config.Environment),
 	)
-	if err != nil {
-		return fmt.Errorf("failed to create resource: %w", err)
-	}
 
 	// Determine sampler based on sampling rate
 	var sampler sdktrace.Sampler
@@ -149,7 +144,7 @@ func RecordError(ctx context.Context, err error, opts ...trace.EventOption) {
 }
 
 // SetStatus sets the status of the current span
-func SetStatus(ctx context.Context, code trace.StatusCode, description string) {
+func SetStatus(ctx context.Context, code codes.Code, description string) {
 	span := trace.SpanFromContext(ctx)
 	if span != nil {
 		span.SetStatus(code, description)
@@ -184,7 +179,7 @@ func TraceFunction(ctx context.Context, functionName string, fn func(context.Con
 	err := fn(ctx)
 	if err != nil {
 		RecordError(ctx, err)
-		SetStatus(ctx, trace.StatusCodeError, err.Error())
+		SetStatus(ctx, codes.Error, err.Error())
 	}
 
 	return err
@@ -198,7 +193,7 @@ func TraceFunctionWithResult[T any](ctx context.Context, functionName string, fn
 	result, err := fn(ctx)
 	if err != nil {
 		RecordError(ctx, err)
-		SetStatus(ctx, trace.StatusCodeError, err.Error())
+		SetStatus(ctx, codes.Error, err.Error())
 	}
 
 	return result, err
@@ -237,6 +232,38 @@ func AddBoolAttribute(ctx context.Context, key string, value bool) {
 // AddFloatAttribute adds a float64 attribute to the current span
 func AddFloatAttribute(ctx context.Context, key string, value float64) {
 	SetAttributes(ctx, attribute.Float64(key, value))
+}
+
+// AddLogEvent adds a log event to the current span with log level
+func AddLogEvent(ctx context.Context, level, message string, attrs ...attribute.KeyValue) {
+	span := trace.SpanFromContext(ctx)
+	if span != nil {
+		allAttrs := append([]attribute.KeyValue{
+			attribute.String("log.level", level),
+			attribute.String("log.message", message),
+		}, attrs...)
+		span.AddEvent("log", trace.WithAttributes(allAttrs...))
+	}
+}
+
+// LogInfo adds an info log event to the current span
+func LogInfo(ctx context.Context, message string, attrs ...attribute.KeyValue) {
+	AddLogEvent(ctx, "INFO", message, attrs...)
+}
+
+// LogError adds an error log event to the current span
+func LogError(ctx context.Context, message string, attrs ...attribute.KeyValue) {
+	AddLogEvent(ctx, "ERROR", message, attrs...)
+}
+
+// LogWarn adds a warning log event to the current span
+func LogWarn(ctx context.Context, message string, attrs ...attribute.KeyValue) {
+	AddLogEvent(ctx, "WARN", message, attrs...)
+}
+
+// LogDebug adds a debug log event to the current span
+func LogDebug(ctx context.Context, message string, attrs ...attribute.KeyValue) {
+	AddLogEvent(ctx, "DEBUG", message, attrs...)
 }
 
 // InjectContext injects the tracing context into a carrier (for propagation)

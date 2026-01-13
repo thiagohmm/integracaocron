@@ -11,7 +11,7 @@ import (
 	"github.com/thiagohmm/integracaocron/domain/entities"
 	"github.com/thiagohmm/integracaocron/pkg/logger"
 	"github.com/thiagohmm/integracaocron/pkg/tracing"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/codes"
 )
 
 type HTTPHandler struct {
@@ -57,7 +57,7 @@ func (h *HTTPHandler) ProcessIntegration(c *gin.Context) {
 	if err != nil {
 		logger.Error(ctx, "REST API - Erro ao processar integração: %v", err)
 		tracing.RecordError(ctx, err)
-		tracing.SetStatus(ctx, trace.StatusCodeError, err.Error())
+		tracing.SetStatus(ctx, codes.Error, err.Error())
 		c.JSON(http.StatusInternalServerError, IntegrationResponse{
 			Success: false,
 			Error:   err.Error(),

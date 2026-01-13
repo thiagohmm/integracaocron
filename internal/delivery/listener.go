@@ -16,7 +16,7 @@ import (
 	infraestructure "github.com/thiagohmm/integracaocron/infraestructure/rabbitmq"
 	"github.com/thiagohmm/integracaocron/pkg/logger"
 	"github.com/thiagohmm/integracaocron/pkg/tracing"
-	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/codes"
 )
 
 type Listener struct {
@@ -417,7 +417,7 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 
 	default:
 		logger.Error(ctx, "Tipo de processo desconhecido: %s", tipoIntegracao)
-		tracing.SetStatus(ctx, trace.StatusCodeError, "unknown integration type")
+		tracing.SetStatus(ctx, codes.Error, "unknown integration type")
 		return fmt.Errorf("tipo de processo desconhecido: %s", tipoIntegracao), ""
 	}
 

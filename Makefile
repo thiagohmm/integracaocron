@@ -18,6 +18,10 @@ help:
 	@echo "  docker-build - Build Docker image"
 	@echo "  docker-run   - Run with Docker Compose"
 	@echo "  docker-stop  - Stop Docker containers"
+	@echo "  jaeger-up    - Start Jaeger tracing"
+	@echo "  jaeger-down  - Stop Jaeger tracing"
+	@echo "  jaeger-logs  - Show Jaeger logs"
+	@echo "  full-stack   - Start full stack (app + Jaeger + RabbitMQ)"
 	@echo "  mod-tidy     - Tidy Go modules"
 	@echo "  fmt          - Format Go code"
 	@echo "  vet          - Run go vet"
@@ -60,6 +64,37 @@ docker-run:
 docker-stop:
 	@echo "Stopping Docker containers..."
 	@docker-compose down
+
+# Start Jaeger tracing
+jaeger-up:
+	@echo "Starting Jaeger tracing..."
+	@docker run -d --name jaeger \
+		-p 16686:16686 \
+		-p 14268:14268 \
+		-p 14250:14250 \
+		-p 6831:6831/udp \
+		-p 6832:6832/udp \
+		jaegertracing/all-in-one:latest
+	@echo "Jaeger UI available at: http://localhost:16686"
+
+# Stop Jaeger tracing
+jaeger-down:
+	@echo "Stopping Jaeger tracing..."
+	@docker stop jaeger || true
+	@docker rm jaeger || true
+
+# Show Jaeger logs
+jaeger-logs:
+	@docker logs -f jaeger
+
+# Start full stack with Jaeger
+full-stack:
+	@echo "Starting full stack with Jaeger..."
+	@docker-compose -f docker-compose.jaeger.yml up -d
+	@echo "Services started:"
+	@echo "  - Jaeger UI: http://localhost:16686"
+	@echo "  - RabbitMQ Management: http://localhost:15672 (admin/admin123)"
+	@echo "  - Application API: http://localhost:8080"
 
 # Tidy Go modules
 mod-tidy:

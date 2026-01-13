@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/thiagohmm/integracaocron/pkg/tracing"
 )
@@ -35,22 +34,30 @@ func (l *Logger) logWithTrace(ctx context.Context, level, message string, args .
 
 func (l *Logger) Info(ctx context.Context, message string, args ...interface{}) {
 	l.logWithTrace(ctx, "INFO", message, args...)
-	tracing.AddEvent(ctx, "log.info", tracing.StringAttr("message", fmt.Sprintf(message, args...)))
+	formattedMessage := fmt.Sprintf(message, args...)
+	tracing.AddEvent(ctx, "log.info", tracing.StringAttr("message", formattedMessage))
+	tracing.LogInfo(ctx, formattedMessage)
 }
 
 func (l *Logger) Error(ctx context.Context, message string, args ...interface{}) {
 	l.logWithTrace(ctx, "ERROR", message, args...)
-	tracing.AddEvent(ctx, "log.error", tracing.StringAttr("message", fmt.Sprintf(message, args...)))
+	formattedMessage := fmt.Sprintf(message, args...)
+	tracing.AddEvent(ctx, "log.error", tracing.StringAttr("message", formattedMessage))
+	tracing.LogError(ctx, formattedMessage)
 }
 
 func (l *Logger) Warn(ctx context.Context, message string, args ...interface{}) {
 	l.logWithTrace(ctx, "WARN", message, args...)
-	tracing.AddEvent(ctx, "log.warn", tracing.StringAttr("message", fmt.Sprintf(message, args...)))
+	formattedMessage := fmt.Sprintf(message, args...)
+	tracing.AddEvent(ctx, "log.warn", tracing.StringAttr("message", formattedMessage))
+	tracing.LogWarn(ctx, formattedMessage)
 }
 
 func (l *Logger) Debug(ctx context.Context, message string, args ...interface{}) {
 	l.logWithTrace(ctx, "DEBUG", message, args...)
-	tracing.AddEvent(ctx, "log.debug", tracing.StringAttr("message", fmt.Sprintf(message, args...)))
+	formattedMessage := fmt.Sprintf(message, args...)
+	tracing.AddEvent(ctx, "log.debug", tracing.StringAttr("message", formattedMessage))
+	tracing.LogDebug(ctx, formattedMessage)
 }
 
 var DefaultLogger = New()

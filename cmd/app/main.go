@@ -188,18 +188,6 @@ func getHTTPPort(cfg *configuration.Conf) string {
 	return httpPort
 }
 
-// getHTTPPort gets HTTP port from environment or config
-func getHTTPPort(cfg *configuration.Conf) string {
-	httpPort := os.Getenv("HTTP_PORT")
-	if httpPort == "" {
-		httpPort = cfg.HTTPPort
-	}
-	if httpPort == "" {
-		httpPort = "8080" // Default port
-	}
-	return httpPort
-}
-
 // getWorkersCount gets the number of workers from environment or uses default
 func getWorkersCount() int {
 	workersStr := os.Getenv("WORKERS")
