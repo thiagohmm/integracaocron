@@ -1,6 +1,7 @@
 package usecases
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/thiagohmm/integracaocron/domain/entities"
 	"github.com/thiagohmm/integracaocron/domain/repositories"
+	"github.com/thiagohmm/integracaocron/pkg/tracing"
 )
 
 // ProductIntegrationUseCase handles product integration business logic
@@ -50,17 +52,21 @@ func (uc *ProductIntegrationUseCase) IntegrateProductService(idProduto, idDealer
 
 // ImportProductIntegration is the main function that imports product integrations
 func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
-	log.Println("Starting product integration import process")
+	ctx := context.Background()
+	ctx, span := tracing.StartSpan(ctx, "ImportProductIntegration")
+	defer span.End()
 
-	var success []bool
+	log.Println("Starting product integration import process")
 
 	// Get products from STAGING table, not from input table
 	productsStagingRecords, err := uc.repo.GetAllProductIntegrationStagingRecords()
 	if err != nil {
+		tracing.RecordError(ctx, err)
 		return false, fmt.Errorf("error getting products from staging: %w", err)
 	}
 
 	log.Printf("Found %d product(s) to process from INTEGRACAOPRODUTOSTAGING", len(productsStagingRecords))
+	tracing.AddIntAttribute(ctx, "total_products", len(productsStagingRecords))
 
 	if len(productsStagingRecords) == 0 {
 		log.Println("No products found to process in staging table. Exiting.")
@@ -72,96 +78,153 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 	if err != nil {
 		return false, fmt.Errorf("error starting transaction: %w", err)
 	}
+
+	// ✅ CORREÇÃO CRÍTICA: Garantir que transação SEMPRE seja fechada
+	committed := false
 	defer func() {
-		if p := recover(); p != nil {
-			tx.Rollback()
-			panic(p)
+		if !committed {
+			if err := tx.Rollback(); err != nil {
+				log.Printf("Error rolling back transaction: %v", err)
+			}
 		}
 	}()
 
-	for i, stagingRecord := range productsStagingRecords {
-		// Wrap each product processing in a func to catch panics
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					log.Printf("PANIC recovered while processing product %d/%d (Staging ID: %d): %v",
-						i+1, len(productsStagingRecords), stagingRecord.IdIntegrationProdutoStaging, r)
-					success = append(success, false)
+	// ✅ CORREÇÃO: Usar contadores ao invés de array para economizar memória
+	var successCount, failureCount int
+	totalProducts := len(productsStagingRecords)
 
-					// Log panic error
-					logErro := entities.QueueMessage{
-						Tabela: "LogIntegrRMS",
-						Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
-						Values: []interface{}{
-							"STAGING",
-							"PRODUTOS",
-							stagingRecord.DataAtualizacao,
-							time.Now(),
-							0, // Status 0 = error
-							stagingRecord.Json,
-							fmt.Sprintf("PANIC: %v", r),
-						},
+	// ✅ CORREÇÃO: Processar em batches para liberar memória periodicamente
+	const batchSize = 100
+	for batchStart := 0; batchStart < totalProducts; batchStart += batchSize {
+		batchEnd := batchStart + batchSize
+		if batchEnd > totalProducts {
+			batchEnd = totalProducts
+		}
+
+		batch := productsStagingRecords[batchStart:batchEnd]
+		log.Printf("Processing batch %d-%d of %d products", batchStart+1, batchEnd, totalProducts)
+
+		// 🔍 Tracing: Criar span para o batch
+		batchCtx, batchSpan := tracing.StartSpan(ctx, "ProcessProductBatch")
+		tracing.AddIntAttribute(batchCtx, "batch.start", batchStart+1)
+		tracing.AddIntAttribute(batchCtx, "batch.end", batchEnd)
+		tracing.AddIntAttribute(batchCtx, "batch.size", len(batch))
+
+		for i, stagingRecord := range batch {
+			actualIndex := batchStart + i + 1
+
+			// 🔍 Tracing: Criar span para cada produto
+			productCtx, productSpan := tracing.StartSpan(batchCtx, "ProcessSingleProduct")
+			tracing.AddInt64Attribute(productCtx, "staging_id", int64(stagingRecord.IdIntegrationProdutoStaging))
+			tracing.AddInt64Attribute(productCtx, "product_id", int64(stagingRecord.IdProduto))
+			tracing.AddInt64Attribute(productCtx, "dealer_id", int64(stagingRecord.IdRevendedor))
+			tracing.AddIntAttribute(productCtx, "product_index", actualIndex)
+
+			// Wrap each product processing in a func to catch panics
+			func() {
+				defer productSpan.End()
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("PANIC recovered while processing product %d/%d (Staging ID: %d): %v",
+							actualIndex, totalProducts, stagingRecord.IdIntegrationProdutoStaging, r)
+						failureCount++
+
+						// 🔍 Tracing: Registrar panic
+						tracing.AddEvent(productCtx, "panic.recovered",
+							tracing.StringAttr("panic_value", fmt.Sprintf("%v", r)),
+							tracing.IntAttr("staging_id", stagingRecord.IdIntegrationProdutoStaging))
+						tracing.SetStatus(productCtx, 2, fmt.Sprintf("PANIC: %v", r)) // codes.Error = 2
+
+						// Log panic error (sem duplicar JSON na memória)
+						logErro := entities.QueueMessage{
+							Tabela: "LogsIntegrRMS",
+							Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "DESCRICAOERRO"},
+							Values: []interface{}{
+								"STAGING",
+								"PRODUTOS",
+								stagingRecord.DataAtualizacao,
+								time.Now(),
+								0, // Status 0 = error
+								fmt.Sprintf("PANIC: %v (Staging ID: %d)", r, stagingRecord.IdIntegrationProdutoStaging),
+							},
+						}
+						uc.repo.SendToQueue(logErro)
 					}
-					uc.repo.SendToQueue(logErro)
+				}()
+
+				log.Printf("Processing product %d/%d (Staging ID: %d, Product ID: %d, Dealer ID: %d)",
+					actualIndex, totalProducts,
+					stagingRecord.IdIntegrationProdutoStaging,
+					stagingRecord.IdProduto,
+					stagingRecord.IdRevendedor)
+
+				result := uc.processProductFromStaging(stagingRecord)
+				log.Printf("Product %d processing result - Success: %v, Message: %s", actualIndex, result.Success, result.Message)
+
+				// 🔍 Tracing: Registrar resultado do processamento
+				tracing.AddBoolAttribute(productCtx, "processing.success", result.Success)
+				tracing.AddStringAttribute(productCtx, "processing.message", result.Message)
+
+				// ✅ CORREÇÃO: Log simplificado sem duplicar JSON completo
+				logErro := entities.QueueMessage{
+					Tabela: "LogsIntegrRMS",
+					Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "DESCRICAOERRO"},
+					Values: []interface{}{
+						"STAGING",
+						"PRODUTOS",
+						stagingRecord.DataAtualizacao,
+						time.Now(),
+						uc.getStatusFromResult(result),
+						uc.getMessageFromResult(result),
+					},
+				}
+
+				// Send to queue (logging mechanism)
+				if err := uc.repo.SendToQueue(logErro); err != nil {
+					log.Printf("Error sending log to queue: %v", err)
+					tracing.RecordError(productCtx, err)
+				}
+
+				// ✅ CORREÇÃO: Incrementar contadores ao invés de append em array
+				if result.Success {
+					successCount++
+					log.Printf("✅ Product %d processed successfully from INTEGRACAOPRODUTOSTAGING", actualIndex)
+					tracing.SetStatus(productCtx, 1, "Success") // codes.Ok = 1
+				} else {
+					failureCount++
+					log.Printf("❌ Product %d processing FAILED: %s", actualIndex, result.Message)
+					log.Printf("⏩ Continuing to next product...")
+					tracing.SetStatus(productCtx, 2, result.Message) // codes.Error = 2
 				}
 			}()
+		}
 
-			log.Printf("Processing product %d/%d (Staging ID: %d, Product ID: %d, Dealer ID: %d)",
-				i+1, len(productsStagingRecords),
-				stagingRecord.IdIntegrationProdutoStaging,
-				stagingRecord.IdProduto,
-				stagingRecord.IdRevendedor)
+		// 🔍 Tracing: Finalizar span do batch e registrar estatísticas
+		tracing.AddIntAttribute(batchCtx, "batch.success_count", successCount)
+		tracing.AddIntAttribute(batchCtx, "batch.failure_count", failureCount)
+		batchSpan.End()
 
-			result := uc.processProductFromStaging(stagingRecord)
-			log.Printf("Product %d processing result - Success: %v, Message: %s", i+1, result.Success, result.Message)
+		// ✅ CORREÇÃO: Liberar batch da memória após processar
+		batch = nil
 
-			logErro := entities.QueueMessage{
-				Tabela: "LogIntegrRMS",
-				Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
-				Values: []interface{}{
-					"STAGING",
-					"PRODUTOS",
-					stagingRecord.DataAtualizacao,
-					time.Now(),
-					uc.getStatusFromResult(result),
-					stagingRecord.Json,
-					uc.getMessageFromResult(result),
-				},
-			}
-
-			// Send to queue (logging mechanism)
-			if err := uc.repo.SendToQueue(logErro); err != nil {
-				log.Printf("Error sending log to queue: %v", err)
-			}
-
-			if result.Success {
-				success = append(success, true)
-				log.Printf("✅ Product %d processed successfully from INTEGRACAOPRODUTOSTAGING", i+1)
-			} else {
-				success = append(success, false)
-				log.Printf("❌ Product %d processing FAILED: %s", i+1, result.Message)
-				log.Printf("⏩ Continuing to next product...")
-			}
-		}()
+		// Log progresso do batch
+		log.Printf("Batch completed. Current stats - Success: %d, Failed: %d", successCount, failureCount)
 	}
 
+	// ✅ CORREÇÃO: Commit com flag para evitar rollback no defer
 	if err := tx.Commit(); err != nil {
+		tracing.RecordError(ctx, err)
 		return false, fmt.Errorf("error committing transaction: %w", err)
 	}
+	committed = true
 
-	// Calculate success/failure summary
-	totalProducts := len(productsStagingRecords)
-	successCount := 0
-	failureCount := 0
+	// 🔍 Tracing: Registrar estatísticas finais
+	tracing.AddIntAttribute(ctx, "final.success_count", successCount)
+	tracing.AddIntAttribute(ctx, "final.failure_count", failureCount)
+	tracing.AddFloatAttribute(ctx, "final.success_rate", float64(successCount)/float64(totalProducts)*100)
+	tracing.SetStatus(ctx, 1, "Product integration completed successfully") // codes.Ok = 1
 
-	for _, val := range success {
-		if val {
-			successCount++
-		} else {
-			failureCount++
-		}
-	}
-
+	// Summary
 	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	log.Printf("📊 PRODUCT INTEGRATION SUMMARY")
 	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")

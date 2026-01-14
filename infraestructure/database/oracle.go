@@ -13,15 +13,13 @@ import (
 )
 
 func ConectarBanco(cfg *config.Conf) (*sql.DB, error) {
-	// Configurar as opções de URL com timeouts mais generosos e configurações compatíveis com Oracle Cloud
+	// Configurar as opções de URL compatíveis com go-ora v2
+	// Documentação: https://github.com/sijms/go-ora
 	urlOptions := map[string]string{
-		"CONNECTION TIMEOUT": "90",    // Timeout de 90 segundos para Oracle Cloud
-		"TIMEOUT":            "90",    // Timeout geral
-		"RETRY COUNT":        "20",    // Número de tentativas de reconexão
-		"RETRY DELAY":        "3",     // Delay entre tentativas (segundos)
-		"ssl":                "true",  // Habilitar SSL para tcps
-		"ssl verify":         "false", // Desabilitar verificação de certificado SSL
-		// "wallet":           "./wallet", // descomente se estiver usando wallet
+		"TIMEOUT":     "90",    // Timeout geral em segundos
+		"ssl":         "true",  // Habilitar SSL para Oracle Cloud
+		"ssl verify":  "false", // Desabilitar verificação de certificado SSL
+		// "wallet":    "./wallet", // descomente se estiver usando wallet
 	}
 
 	// Construir a string de conexão

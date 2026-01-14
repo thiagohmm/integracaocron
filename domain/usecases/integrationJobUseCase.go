@@ -1,6 +1,7 @@
 package usecases
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"log"
@@ -8,15 +9,16 @@ import (
 	"time"
 
 	"github.com/thiagohmm/integracaocron/domain/entities"
+	"github.com/thiagohmm/integracaocron/pkg/tracing"
 )
 
 // IntegrationJobUseCase handles the main integration job operations
 type IntegrationJobUseCase struct {
-	parameterRepo         entities.ParameterRepository
-	integrationRepo       entities.IntegrationRepository
-	networkRepo           entities.NetworkRepository
+	parameterRepo        entities.ParameterRepository
+	integrationRepo      entities.IntegrationRepository
+	networkRepo          entities.NetworkRepository
 	productIntegrationUC *ProductIntegrationUseCase
-	db                    *sql.DB
+	db                   *sql.DB
 }
 
 // NewIntegrationJobUseCase creates a new instance of IntegrationJobUseCase
@@ -28,56 +30,88 @@ func NewIntegrationJobUseCase(
 	db *sql.DB,
 ) *IntegrationJobUseCase {
 	return &IntegrationJobUseCase{
-		parameterRepo:         parameterRepo,
-		integrationRepo:       integrationRepo,
-		networkRepo:           networkRepo,
+		parameterRepo:        parameterRepo,
+		integrationRepo:      integrationRepo,
+		networkRepo:          networkRepo,
 		productIntegrationUC: productIntegrationUC,
-		db:                    db,
+		db:                   db,
 	}
 }
 
-
 // ProductNetworkMain is the Go equivalent of the main TypeScript function
 func (uc *IntegrationJobUseCase) ProductNetworkMain(dataCorte time.Time) error {
+	ctx := context.Background()
+	ctx, span := tracing.StartSpan(ctx, "ProductNetworkMain")
+	defer span.End()
+
 	log.Println("Job Integração - Início")
+
+	// 🔍 Tracing: Registrar data de corte
+	tracing.AddStringAttribute(ctx, "data_corte", dataCorte.Format(time.RFC3339))
 
 	// Begin transaction
 	tx, err := uc.db.Begin()
 	if err != nil {
+		tracing.RecordError(ctx, err)
 		return fmt.Errorf("erro ao iniciar transação: %w", err)
 	}
+
+	// ✅ CORREÇÃO CRÍTICA: Garantir que transação SEMPRE seja fechada
+	committed := false
 	defer func() {
-		if p := recover(); p != nil {
-			tx.Rollback()
-			panic(p) // re-panic after rollback
+		if !committed {
+			if rbErr := tx.Rollback(); rbErr != nil {
+				log.Printf("Erro ao fazer rollback da transação: %v", rbErr)
+			}
+		}
+		if r := recover(); r != nil {
+			log.Printf("PANIC recuperado em ProductNetworkMain: %v", r)
+			panic(r) // re-panic after cleanup
 		}
 	}()
 
 	// Execute all integration jobs
 	if err := uc.IntegrationJob(); err != nil {
-		tx.Rollback()
+		log.Printf("Erro no integration job: %v", err)
+		tracing.RecordError(ctx, err)
+		tracing.AddEvent(ctx, "integration_job.failed", tracing.StringAttr("error", err.Error()))
 		return fmt.Errorf("erro no integration job: %w", err)
 	}
+	tracing.AddEvent(ctx, "integration_job.completed")
 
 	if err := uc.ReplicateNetworkProductsJob(); err != nil {
-		tx.Rollback()
+		log.Printf("Erro no replicate network products job: %v", err)
+		tracing.RecordError(ctx, err)
+		tracing.AddEvent(ctx, "replicate_network.failed", tracing.StringAttr("error", err.Error()))
 		return fmt.Errorf("erro no replicate network products job: %w", err)
 	}
+	tracing.AddEvent(ctx, "replicate_network.completed")
 
 	if err := uc.MoveDataJob(dataCorte); err != nil {
-		tx.Rollback()
+		log.Printf("Erro no move data job: %v", err)
+		tracing.RecordError(ctx, err)
+		tracing.AddEvent(ctx, "move_data.failed", tracing.StringAttr("error", err.Error()))
 		return fmt.Errorf("erro no move data job: %w", err)
 	}
+	tracing.AddEvent(ctx, "move_data.completed")
 
 	if err := uc.UpdateExpirationSlaRequestsJob(); err != nil {
-		tx.Rollback()
+		log.Printf("Erro no update expiration SLA requests job: %v", err)
+		tracing.RecordError(ctx, err)
+		tracing.AddEvent(ctx, "update_expiration.failed", tracing.StringAttr("error", err.Error()))
 		return fmt.Errorf("erro no update expiration SLA requests job: %w", err)
 	}
+	tracing.AddEvent(ctx, "update_expiration.completed")
 
 	// Commit transaction
 	if err := tx.Commit(); err != nil {
+		tracing.RecordError(ctx, err)
 		return fmt.Errorf("erro ao fazer commit da transação: %w", err)
 	}
+	committed = true
+
+	// 🔍 Tracing: Registrar sucesso
+	tracing.SetStatus(ctx, 1, "All integration jobs completed successfully") // codes.Ok = 1
 
 	log.Println("Job Integração - Término")
 	return nil
@@ -301,56 +335,108 @@ func (uc *IntegrationJobUseCase) SetValueParameterEndTransactionJob() error {
 
 // ReplicateNetworkProductsJob replicates products across networks
 func (uc *IntegrationJobUseCase) ReplicateNetworkProductsJob() error {
+	ctx := context.Background()
+	ctx, span := tracing.StartSpan(ctx, "ReplicateNetworkProductsJob")
+	defer span.End()
+
 	log.Println("Replicar produtos redes - Início.")
 
 	networks, err := uc.networkRepo.GetNetwork()
 	if err != nil {
+		tracing.RecordError(ctx, err)
 		return fmt.Errorf("erro ao obter redes: %w", err)
 	}
 
-	for _, net := range networks {
-		lojas, err := uc.networkRepo.ListByAllByIdDealerNew(net.IdRevendedor)
-		if err != nil {
-			log.Printf("Erro ao obter lojas para revendedor %d: %v", net.IdRevendedor, err)
-			continue
-		}
+	log.Printf("Processando %d redes para replicação", len(networks))
+	tracing.AddIntAttribute(ctx, "total_networks", len(networks))
 
+	for i, net := range networks {
+		// 🔍 Tracing: Criar span para cada rede
+		networkCtx, networkSpan := tracing.StartSpan(ctx, "ProcessNetwork")
+		tracing.AddInt64Attribute(networkCtx, "network_id", int64(net.IdRede))
+		tracing.AddInt64Attribute(networkCtx, "dealer_id", int64(net.IdRevendedor))
+		tracing.AddIntAttribute(networkCtx, "network_index", i+1)
+
+		log.Printf("[%d/%d] Processando rede %d (Revendedor: %d)", i+1, len(networks), net.IdRede, net.IdRevendedor)
+
+		// Replicar produtos da rede ANTES de buscar lojas (otimização)
 		err = uc.networkRepo.ReplicateProductNetwork(net.IdRede)
 		if err != nil {
 			log.Printf("Erro ao replicar produtos da rede %d: %v", net.IdRede, err)
+			tracing.RecordError(networkCtx, err)
+			tracing.AddEvent(networkCtx, "replicate_products.failed", tracing.StringAttr("error", err.Error()))
+			networkSpan.End()
+			continue
+		}
+		tracing.AddEvent(networkCtx, "replicate_products.completed")
+
+		// Buscar lojas da rede
+		lojas, err := uc.networkRepo.ListByAllByIdDealerNew(net.IdRevendedor)
+		if err != nil {
+			log.Printf("Erro ao obter lojas para revendedor %d: %v", net.IdRevendedor, err)
+			tracing.RecordError(networkCtx, err)
+			tracing.AddEvent(networkCtx, "list_dealers.failed", tracing.StringAttr("error", err.Error()))
+			networkSpan.End()
 			continue
 		}
 
-		for _, ljsItem := range lojas {
-			_, err := uc.networkRepo.GetNetworkReplicadosByDealer(ljsItem.IdRevendedor)
-			if err != nil {
-				log.Printf("Erro ao obter replicados do revendedor %d: %v", ljsItem.IdRevendedor, err)
-				continue
+		log.Printf("Rede %d: encontradas %d lojas para processar", net.IdRede, len(lojas))
+		tracing.AddIntAttribute(networkCtx, "dealers_count", len(lojas))
+
+		// Processar lojas em batch (otimização)
+		if len(lojas) > 0 {
+			// Extrair IDs das lojas para processar em batch
+			var dealerIDs []int
+			for _, loja := range lojas {
+				dealerIDs = append(dealerIDs, loja.IdRevendedor)
 			}
 
-			products, err := uc.networkRepo.GetProductsByReplicateNetworkServiceNew(ljsItem.IdRevendedor)
+			// Processar produtos em batch (reduz queries)
+			err := uc.networkRepo.ProcessReplicatedProductsInBatch(dealerIDs, net.IdRede)
 			if err != nil {
-				log.Printf("Erro ao obter produtos para replicação do revendedor %d: %v", ljsItem.IdRevendedor, err)
-				continue
+				log.Printf("Erro ao processar produtos em batch para rede %d: %v", net.IdRede, err)
+				tracing.RecordError(networkCtx, err)
+				tracing.AddEvent(networkCtx, "batch_processing.failed", tracing.StringAttr("error", err.Error()))
+				// Fallback: processar individualmente
+				uc.processLojasIndividually(lojas, net.IdRede)
+				tracing.AddEvent(networkCtx, "fallback_processing.completed")
+			} else {
+				tracing.AddEvent(networkCtx, "batch_processing.completed", tracing.IntAttr("dealers_processed", len(dealerIDs)))
 			}
+		}
 
-			for _, product := range products {
-				// The product object from the database needs to be converted to the ProductSelectIntegration struct
-				// This is a placeholder, as the actual mapping will depend on the structure of the returned product
-				productSelect := entities.ProductSelectIntegration{
-					CodRMS: entities.FlexibleString(fmt.Sprintf("%d", product.CodigoRMS)),
-					// Map other fields as necessary
-				}
-				err := uc.productIntegrationUC.IntegrateProductService(product.IdProduto, ljsItem.IdRevendedor, productSelect)
-				if err != nil {
-					log.Printf("Error integrating product %d for dealer %d: %v", product.IdProduto, ljsItem.IdRevendedor, err)
-				}
+		log.Printf("Rede %d processada com sucesso", net.IdRede)
+		tracing.SetStatus(networkCtx, 1, "Network processed successfully") // codes.Ok = 1
+		networkSpan.End()
+	}
+
+	// 🔍 Tracing: Finalizar job com sucesso
+	tracing.SetStatus(ctx, 1, "All networks replicated successfully") // codes.Ok = 1
+	log.Println("Replicar produtos redes - Fim.")
+	return nil
+}
+
+// processLojasIndividually fallback method to process stores individually
+func (uc *IntegrationJobUseCase) processLojasIndividually(lojas []entities.DealerNetwork, idRede int) {
+	log.Printf("Processando %d lojas individualmente (fallback) para rede %d", len(lojas), idRede)
+
+	for _, loja := range lojas {
+		products, err := uc.networkRepo.GetProductsByReplicateNetworkServiceNew(loja.IdRevendedor)
+		if err != nil {
+			log.Printf("Erro ao obter produtos para revendedor %d: %v", loja.IdRevendedor, err)
+			continue
+		}
+
+		for _, product := range products {
+			productSelect := entities.ProductSelectIntegration{
+				CodRMS: entities.FlexibleString(fmt.Sprintf("%d", product.CodigoRMS)),
+			}
+			err := uc.productIntegrationUC.IntegrateProductService(product.IdProduto, loja.IdRevendedor, productSelect)
+			if err != nil {
+				log.Printf("Erro ao integrar produto %d para revendedor %d: %v", product.IdProduto, loja.IdRevendedor, err)
 			}
 		}
 	}
-
-	log.Println("Replicar produtos redes - Fim.")
-	return nil
 }
 
 // MoveDataJob moves data between staging tables

@@ -107,6 +107,7 @@ type NetworkRepository interface {
 	GetNetwork() ([]Network, error)
 	ListByAllByIdDealerNew(idDealer int) ([]DealerNetwork, error)
 	ReplicateProductNetwork(idRede int) error
+	ProcessReplicatedProductsInBatch(dealerIDs []int, idRede int) error
 	GetNetworkReplicadosByDealer(idRevendedor int) ([]interface{}, error)
 	GetProductsByReplicateNetworkServiceNew(idRevendedor int) ([]ProductSelect, error)
 	GetProductsByReplicateNetworkReplicate(idProduto int) ([]ProductSelect, error)

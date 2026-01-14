@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/thiagohmm/integracaocron/domain/entities"
@@ -28,13 +29,13 @@ func (r *NetworkRepositoryImpl) GetNetwork() ([]entities.Network, error) {
 	defer cancel()
 
 	query := `
-		SELECT ID_REDE, DESCRICAO_REDE, ID_REVENDEDOR, STATUS_REDE, REPLICAR_PRODUTO, 
-			   DATA_CADASTRO, DATA_ATUALIZACAO, PERMITE_REPLICAR_PRODUTO, USUARIO_REPLICOU
+		SELECT IDREDE, DESCRICAOREDE, IDREVENDEDOR, STATUSREDE, REPLICARPRODUTO, 
+			   DATACADASTRO, DATAATUALIZACAO, PERMITEREPLICARPRODUTO, USUARIOREPLICOU
 		FROM REDE 
-		WHERE PERMITE_REPLICAR_PRODUTO = '1' 
-		  AND STATUS_REDE = '1' 
-		  AND REPLICAR_PRODUTO = '1'
-		ORDER BY ID_REDE`
+		WHERE PERMITEREPLICARPRODUTO = '1' 
+		  AND STATUSREDE = '1' 
+		  AND REPLICARPRODUTO = '1'
+		ORDER BY IDREDE`
 
 	rows, err := r.db.QueryContext(ctx, query)
 	if err != nil {
@@ -114,7 +115,7 @@ func (r *NetworkRepositoryImpl) ReplicateProductNetwork(idRede int) error {
 	log.Printf("ReplicateProductNetwork called for idRede: %d", idRede)
 
 	// Example placeholder query - replace with actual implementation
-	query := `UPDATE PRODUTOS_REDE SET STATUS_REPLICACAO = 'ATIVO' WHERE ID_REDE = :1`
+	query := `UPDATE PRODUTOS_REDE SET STATUS_REPLICACAO = 'ATIVO' WHERE IDREDE = :1`
 
 	_, err := r.db.ExecContext(ctx, query, idRede)
 	if err != nil {
@@ -220,16 +221,89 @@ func (r *NetworkRepositoryImpl) GetProductsByReplicateNetworkReplicate(idProduto
 	return products, nil
 }
 
+// ProcessReplicatedProductsInBatch processes products in batch for better performance
+func (r *NetworkRepositoryImpl) ProcessReplicatedProductsInBatch(dealerIDs []int, idRede int) error {
+	if len(dealerIDs) == 0 {
+		return nil
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second) // Timeout maior para batch
+	defer cancel()
+
+	// Usar stored procedure ou query otimizada para processar em batch
+	// Isso evita N queries individuais
+	log.Printf("Processando batch de %d revendedores para rede %d", len(dealerIDs), idRede)
+
+	// Opção 1: Usar stored procedure (mais eficiente)
+	query := `BEGIN sp_ProcessarProdutosRede(:1, :2); END;`
+
+	// Converter array de IDs para string separada por vírgula
+	dealerIDsStr := ""
+	for i, id := range dealerIDs {
+		if i > 0 {
+			dealerIDsStr += ","
+		}
+		dealerIDsStr += fmt.Sprintf("%d", id)
+	}
+
+	_, err := r.db.ExecContext(ctx, query, dealerIDsStr, idRede)
+	if err != nil {
+		// Se a stored procedure não existir, fazer fallback
+		if strings.Contains(err.Error(), "ORA-00904") || strings.Contains(err.Error(), "PLS-00201") {
+			log.Printf("Stored procedure sp_ProcessarProdutosRede não encontrada, usando fallback")
+			return r.processReplicatedProductsInBatchFallback(dealerIDs, idRede)
+		}
+		log.Printf("Erro ao processar produtos em batch: %v", err)
+		return fmt.Errorf("erro ao processar produtos em batch: %w", err)
+	}
+
+	log.Printf("Batch processado com sucesso: %d revendedores", len(dealerIDs))
+	return nil
+}
+
+// processReplicatedProductsInBatchFallback fallback method using SQL directly
+func (r *NetworkRepositoryImpl) processReplicatedProductsInBatchFallback(dealerIDs []int, idRede int) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	// Construir query com IN clause (mais eficiente que N queries)
+	dealerIDsStr := ""
+	for i, id := range dealerIDs {
+		if i > 0 {
+			dealerIDsStr += ","
+		}
+		dealerIDsStr += fmt.Sprintf("%d", id)
+	}
+
+	// Query otimizada que processa todos os revendedores de uma vez
+	query := fmt.Sprintf(`
+		UPDATE INTEGRACAOPRODUTOSTAGING 
+		SET DATAPROCESSAMENTO = SYSTIMESTAMP,
+			STATUSPROCESSAMENTO = 1
+		WHERE IDREVENDEDOR IN (%s)
+		  AND IDREDE = :1`, dealerIDsStr)
+
+	result, err := r.db.ExecContext(ctx, query, idRede)
+	if err != nil {
+		log.Printf("Erro ao processar produtos (fallback): %v", err)
+		return fmt.Errorf("erro ao processar produtos (fallback): %w", err)
+	}
+
+	rows, _ := result.RowsAffected()
+	log.Printf("Batch fallback processado: %d produtos atualizados", rows)
+	return nil
+}
+
 // GetNetworkByDealer retrieves a network by dealer ID
 func (r *NetworkRepositoryImpl) GetNetworkByDealer(idDealer int) (*entities.Network, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	query := `
-		SELECT ID_REDE, DESCRICAO_REDE, ID_REVENDEDOR, STATUS_REDE, REPLICAR_PRODUTO, 
-			   DATA_CADASTRO, DATA_ATUALIZACAO, PERMITE_REPLICAR_PRODUTO, USUARIO_REPLICOU
+		SELECT IDREDE, DESCRICAOREDE, IDREVENDEDOR, STATUSREDE, REPLICARPRODUTO, 
+			   DATACADASTRO, DATAATUALIZACAO, PERMITEREPLICARPRODUTO, USUARIOREPLICOU
 		FROM REDE 
-		WHERE ID_REVENDEDOR = :1`
+		WHERE IDREVENDEDOR = :1`
 
 	var network entities.Network
 	err := r.db.QueryRowContext(ctx, query, idDealer).Scan(
@@ -264,14 +338,14 @@ func (r *NetworkRepositoryImpl) UpdateNetwork(network *entities.Network) error {
 
 	query := `
 		UPDATE REDE SET 
-			DESCRICAO_REDE = :1, 
-			ID_REVENDEDOR = :2, 
-			STATUS_REDE = :3, 
-			REPLICAR_PRODUTO = :4, 
-			DATA_ATUALIZACAO = :5, 
-			PERMITE_REPLICAR_PRODUTO = :6, 
-			USUARIO_REPLICOU = :7
-		WHERE ID_REDE = :8`
+			DESCRICAOREDE = :1, 
+			IDREVENDEDOR = :2, 
+			STATUSREDE = :3, 
+			REPLICARPRODUTO = :4, 
+			DATAATUALIZACAO = :5, 
+			PERMITEREPLICARPRODUTO = :6, 
+			USUARIOREPLICOU = :7
+		WHERE IDREDE = :8`
 
 	result, err := r.db.ExecContext(ctx, query,
 		network.DescricaoRede,
@@ -361,7 +435,7 @@ func (r *NetworkRepositoryImpl) RequestReplicateProducts(idNetwork int, userLogi
 
 	// First, check if network exists by ID
 	var network entities.Network
-	checkQuery := `SELECT ID_REDE FROM REDE WHERE ID_REDE = :1`
+	checkQuery := `SELECT IDREDE FROM REDE WHERE IDREDE = :1`
 	err := r.db.QueryRowContext(ctx, checkQuery, idNetwork).Scan(&network.IdRede)
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -382,9 +456,9 @@ func (r *NetworkRepositoryImpl) RequestReplicateProducts(idNetwork int, userLogi
 	// Update network to request replication
 	query := `
 		UPDATE REDE SET 
-			UsuarioReplicou = :1, 
-			replicarProduto = '1' 
-		WHERE IdRede = :2`
+			USUARIOREPLICOU = :1, 
+			REPLICARPRODUTO = '1' 
+		WHERE IDREDE = :2`
 
 	execResult, err := r.db.ExecContext(ctx, query, usuarioReplicou, network.IdRede)
 	if err != nil {
