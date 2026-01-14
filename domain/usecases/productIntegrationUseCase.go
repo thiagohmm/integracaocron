@@ -84,10 +84,10 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 		func() {
 			defer func() {
 				if r := recover(); r != nil {
-					log.Printf("PANIC recovered while processing product %d/%d (Staging ID: %d): %v", 
+					log.Printf("PANIC recovered while processing product %d/%d (Staging ID: %d): %v",
 						i+1, len(productsStagingRecords), stagingRecord.IdIntegrationProdutoStaging, r)
 					success = append(success, false)
-					
+
 					// Log panic error
 					logErro := entities.QueueMessage{
 						Tabela: "LogIntegrRMS",
@@ -153,7 +153,7 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 	totalProducts := len(productsStagingRecords)
 	successCount := 0
 	failureCount := 0
-	
+
 	for _, val := range success {
 		if val {
 			successCount++
@@ -216,6 +216,8 @@ func (uc *ProductIntegrationUseCase) processProductIntegration(rms entities.Inte
 }
 
 // processProductFromStaging processes a single product from staging table
+// This function calls the Oracle procedure pkg_integra_produto.prc_integra_hermes
+// just like the TypeScript version does with dopkg_produto
 func (uc *ProductIntegrationUseCase) processProductFromStaging(stagingRecord entities.ProductIntegrationStaging) *entities.LogValidate {
 	defer func() {
 		if r := recover(); r != nil {
@@ -223,55 +225,53 @@ func (uc *ProductIntegrationUseCase) processProductFromStaging(stagingRecord ent
 		}
 	}()
 
-	log.Printf("Processing staging record - ID: %d, Product ID: %d, Dealer ID: %d",
+	log.Printf("Processing staging record - Staging ID: %d, Product ID: %d, Dealer ID: %d",
 		stagingRecord.IdIntegrationProdutoStaging,
 		stagingRecord.IdProduto,
 		stagingRecord.IdRevendedor)
 
-	// Parse JSON from staging into ProductSelectIntegration
+	// Parse JSON to validate it (optional, but good for logging)
 	var productSelect entities.ProductSelectIntegration
 	if err := json.Unmarshal([]byte(stagingRecord.Json), &productSelect); err != nil {
-		log.Printf("ERROR: Failed to parse JSON from staging ID %d into ProductSelectIntegration: %v", stagingRecord.IdIntegrationProdutoStaging, err)
+		log.Printf("ERROR: Failed to parse JSON from staging ID %d: %v", stagingRecord.IdIntegrationProdutoStaging, err)
 		return &entities.LogValidate{
 			Success: false,
 			Message: fmt.Sprintf("Error parsing JSON from staging: %v", err),
 		}
 	}
 
-	// Construct ProductInJson from ProductSelectIntegration and other staging data
-	// This mirrors the structure expected by getNewProduct
-	productInJson := entities.ProductInJson{
-		ProdutosSelect: []entities.ProductSelectIntegration{productSelect},
-		Pesavel:        productSelect.Pesavel, // Assuming pesavel is part of ProductSelectIntegration or derivable
-	}
+	log.Printf("JSON parsed successfully from staging, calling Oracle procedure pkg_integra_produto.prc_integra_hermes for Product ID: %d", stagingRecord.IdProduto)
 
-	log.Printf("JSON parsed successfully from staging, calling getNewProduct for Product ID: %d", stagingRecord.IdProduto)
-
-	// Call getNewProduct to process the product
-	validationResult, err := uc.getNewProduct(productInJson)
+	// Call Oracle procedure to process the product (just like TypeScript dopkg_produto)
+	// The procedure receives the Product ID and processes the integration
+	result, err := uc.repo.DoPackageProductIntegration(stagingRecord.IdProduto)
 	if err != nil {
-		log.Printf("ERROR: getNewProduct failed for staging ID %d: %v", stagingRecord.IdIntegrationProdutoStaging, err)
+		log.Printf("ERROR: Oracle procedure failed for Product ID %d (Staging ID: %d): %v",
+			stagingRecord.IdProduto, stagingRecord.IdIntegrationProdutoStaging, err)
 		return &entities.LogValidate{
 			Success: false,
-			Message: fmt.Sprintf("Error processing product with getNewProduct: %v", err),
+			Message: fmt.Sprintf("Error executing Oracle procedure: %v", err),
 		}
 	}
 
-	if validationResult.Success {
-		log.Printf("Product from staging processed successfully - Product ID: %d, Dealer ID: %d. Removing from staging.", stagingRecord.IdProduto, stagingRecord.IdRevendedor)
-		// Remove from staging after successful processing
-		err := uc.repo.RemoveProductIntegrationStagingRecord(stagingRecord.IdIntegrationProdutoStaging)
-		if err != nil {
-			log.Printf("ERROR: Failed to remove staging record %d: %v", stagingRecord.IdIntegrationProdutoStaging, err)
-			// Log the error but still return success for the product processing itself
-			return &entities.LogValidate{
-				Success: true,
-				Message: fmt.Sprintf("Product processed, but failed to remove from staging: %v", err),
-			}
+	log.Printf("Oracle procedure completed for Product ID %d - Success: %v, Message: %s",
+		stagingRecord.IdProduto, result.Success, result.Message)
+
+	// Always remove from staging after processing (success or failure)
+	// This matches the TypeScript behavior: await removeProductService(rms, integrRmsProductInQuery)
+	err = uc.repo.RemoveProductIntegrationStagingRecord(stagingRecord.IdIntegrationProdutoStaging)
+	if err != nil {
+		log.Printf("ERROR: Failed to remove staging record %d: %v", stagingRecord.IdIntegrationProdutoStaging, err)
+		// Return the original result but note the removal failure
+		return &entities.LogValidate{
+			Success: result.Success,
+			Message: fmt.Sprintf("%s (Warning: Failed to remove from staging: %v)", result.Message, err),
 		}
 	}
 
-	return validationResult
+	log.Printf("Staging record %d removed successfully", stagingRecord.IdIntegrationProdutoStaging)
+
+	return result
 }
 
 // getNewProduct processes and validates product data (commented out equivalent to TypeScript version)
