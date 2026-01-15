@@ -221,6 +221,23 @@ func (r *NetworkRepositoryImpl) GetProductsByReplicateNetworkReplicate(idProduto
 	return products, nil
 }
 
+// GetProductsByReplicateNetworkNew calls stored procedure to save product integration
+// Equivalent to TypeScript: getProductsByReplicateNetworkNew
+func (r *NetworkRepositoryImpl) GetProductsByReplicateNetworkNew(idRevendedor int, idProduto *int, produtosReplicados string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	query := `BEGIN SP_GRAVARINTEGRACAOPRODUTOSTAGINGPARCIAL(:1, :2, :3); END;`
+
+	_, err := r.db.ExecContext(ctx, query, idRevendedor, idProduto, produtosReplicados)
+	if err != nil {
+		log.Printf("Erro ao executar SP_GRAVARINTEGRACAOPRODUTOSTAGINGPARCIAL: %v", err)
+		return fmt.Errorf("erro ao gravar integração produto staging parcial: %w", err)
+	}
+
+	return nil
+}
+
 // ProcessReplicatedProductsInBatch processes products in batch for better performance
 func (r *NetworkRepositoryImpl) ProcessReplicatedProductsInBatch(dealerIDs []int, idRede int) error {
 	if len(dealerIDs) == 0 {

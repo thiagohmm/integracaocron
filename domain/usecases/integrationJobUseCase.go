@@ -262,7 +262,7 @@ func (uc *IntegrationJobUseCase) RemoverTransacaoIntegracaoCombo(dataCorte time.
 
 func (uc *IntegrationJobUseCase) RemoverTransacaoIntegracaoEmbalagem(dataCorte time.Time) error {
 	log.Println("Remover transação integração embalagem - Início")
-	err := uc.integrationRepo.ClearIntegrationPackagingByCutOffDate(dataCorte)
+	err := uc.integrationRepo.ClearIntegrationPackagingByCutOffDate(dataCorte, "NAO")
 	if err != nil {
 		return err
 	}
@@ -272,7 +272,7 @@ func (uc *IntegrationJobUseCase) RemoverTransacaoIntegracaoEmbalagem(dataCorte t
 
 func (uc *IntegrationJobUseCase) RemoverTransacaoIntegracaoEstruturaMercadologica(dataCorte time.Time) error {
 	log.Println("Remover Transação Integração Estrutura Mercadológica - Início")
-	err := uc.integrationRepo.RemoverTransacaoIntegracaoEstruturaMercadologica(dataCorte)
+	err := uc.integrationRepo.RemoverTransacaoIntegracaoEstruturaMercadologica(dataCorte, "NAO")
 	if err != nil {
 		return err
 	}
@@ -282,7 +282,7 @@ func (uc *IntegrationJobUseCase) RemoverTransacaoIntegracaoEstruturaMercadologic
 
 func (uc *IntegrationJobUseCase) RemoverTransacaoIntegracaoProduto(dataCorte time.Time) error {
 	log.Println("Remover transação integração produto - Início")
-	err := uc.integrationRepo.RemoverTransacaoIntegracaoProduto(dataCorte)
+	err := uc.integrationRepo.RemoverTransacaoIntegracaoProduto(dataCorte, "NAO")
 	if err != nil {
 		return err
 	}
@@ -292,7 +292,7 @@ func (uc *IntegrationJobUseCase) RemoverTransacaoIntegracaoProduto(dataCorte tim
 
 func (uc *IntegrationJobUseCase) RemoverTransacaoIntegracaoPromocao(dataCorte time.Time) error {
 	log.Println("Remover transação integração promoção - Início")
-	err := uc.integrationRepo.RemoverTransacaoIntegracaoPromocao(dataCorte)
+	err := uc.integrationRepo.RemoverTransacaoIntegracaoPromocao(dataCorte, "NAO")
 	if err != nil {
 		return err
 	}
@@ -335,83 +335,50 @@ func (uc *IntegrationJobUseCase) SetValueParameterEndTransactionJob() error {
 
 // ReplicateNetworkProductsJob replicates products across networks
 func (uc *IntegrationJobUseCase) ReplicateNetworkProductsJob() error {
-	ctx := context.Background()
-	ctx, span := tracing.StartSpan(ctx, "ReplicateNetworkProductsJob")
-	defer span.End()
-
 	log.Println("Replicar produtos redes - Início.")
 
+	// Buscar redes com permissão de replicação
 	networks, err := uc.networkRepo.GetNetwork()
 	if err != nil {
-		tracing.RecordError(ctx, err)
+		log.Printf("Erro ao obter redes: %v", err)
 		return fmt.Errorf("erro ao obter redes: %w", err)
 	}
 
-	log.Printf("Processando %d redes para replicação", len(networks))
-	tracing.AddIntAttribute(ctx, "total_networks", len(networks))
-
-	for i, net := range networks {
-		// 🔍 Tracing: Criar span para cada rede
-		networkCtx, networkSpan := tracing.StartSpan(ctx, "ProcessNetwork")
-		tracing.AddInt64Attribute(networkCtx, "network_id", int64(net.IdRede))
-		tracing.AddInt64Attribute(networkCtx, "dealer_id", int64(net.IdRevendedor))
-		tracing.AddIntAttribute(networkCtx, "network_index", i+1)
-
-		log.Printf("[%d/%d] Processando rede %d (Revendedor: %d)", i+1, len(networks), net.IdRede, net.IdRevendedor)
-
-		// Replicar produtos da rede ANTES de buscar lojas (otimização)
-		err = uc.networkRepo.ReplicateProductNetwork(net.IdRede)
-		if err != nil {
-			log.Printf("Erro ao replicar produtos da rede %d: %v", net.IdRede, err)
-			tracing.RecordError(networkCtx, err)
-			tracing.AddEvent(networkCtx, "replicate_products.failed", tracing.StringAttr("error", err.Error()))
-			networkSpan.End()
-			continue
-		}
-		tracing.AddEvent(networkCtx, "replicate_products.completed")
+	for _, net := range networks {
+		log.Printf("Processando rede %d (Revendedor: %d)", net.IdRede, net.IdRevendedor)
 
 		// Buscar lojas da rede
 		lojas, err := uc.networkRepo.ListByAllByIdDealerNew(net.IdRevendedor)
 		if err != nil {
 			log.Printf("Erro ao obter lojas para revendedor %d: %v", net.IdRevendedor, err)
-			tracing.RecordError(networkCtx, err)
-			tracing.AddEvent(networkCtx, "list_dealers.failed", tracing.StringAttr("error", err.Error()))
-			networkSpan.End()
 			continue
 		}
 
-		log.Printf("Rede %d: encontradas %d lojas para processar", net.IdRede, len(lojas))
-		tracing.AddIntAttribute(networkCtx, "dealers_count", len(lojas))
-
-		// Processar lojas em batch (otimização)
-		if len(lojas) > 0 {
-			// Extrair IDs das lojas para processar em batch
-			var dealerIDs []int
-			for _, loja := range lojas {
-				dealerIDs = append(dealerIDs, loja.IdRevendedor)
-			}
-
-			// Processar produtos em batch (reduz queries)
-			err := uc.networkRepo.ProcessReplicatedProductsInBatch(dealerIDs, net.IdRede)
-			if err != nil {
-				log.Printf("Erro ao processar produtos em batch para rede %d: %v", net.IdRede, err)
-				tracing.RecordError(networkCtx, err)
-				tracing.AddEvent(networkCtx, "batch_processing.failed", tracing.StringAttr("error", err.Error()))
-				// Fallback: processar individualmente
-				uc.processLojasIndividually(lojas, net.IdRede)
-				tracing.AddEvent(networkCtx, "fallback_processing.completed")
-			} else {
-				tracing.AddEvent(networkCtx, "batch_processing.completed", tracing.IntAttr("dealers_processed", len(dealerIDs)))
-			}
+		// Replicar produtos da rede (stored procedure)
+		err = uc.networkRepo.ReplicateProductNetwork(net.IdRede)
+		if err != nil {
+			log.Printf("Erro ao replicar produtos da rede %d: %v", net.IdRede, err)
+			continue
 		}
 
-		log.Printf("Rede %d processada com sucesso", net.IdRede)
-		tracing.SetStatus(networkCtx, 1, "Network processed successfully") // codes.Ok = 1
-		networkSpan.End()
+		// Processar cada loja
+		for _, loja := range lojas {
+			// Verificar se existe produto replicado para esta loja
+			_, err := uc.networkRepo.GetNetworkReplicadosByDealer(loja.IdRevendedor)
+			if err != nil {
+				log.Printf("Erro ao verificar produtos replicados para revendedor %d: %v", loja.IdRevendedor, err)
+				continue
+			}
+
+			// Gravar integração de produtos replicados (stored procedure)
+			err = uc.networkRepo.GetProductsByReplicateNetworkNew(loja.IdRevendedor, nil, "SIM")
+			if err != nil {
+				log.Printf("Erro ao gravar integração para revendedor %d: %v", loja.IdRevendedor, err)
+				continue
+			}
+		}
 	}
 
-	// 🔍 Tracing: Finalizar job com sucesso
-	tracing.SetStatus(ctx, 1, "All networks replicated successfully") // codes.Ok = 1
 	log.Println("Replicar produtos redes - Fim.")
 	return nil
 }
@@ -441,45 +408,150 @@ func (uc *IntegrationJobUseCase) processLojasIndividually(lojas []entities.Deale
 
 // MoveDataJob moves data between staging tables
 func (uc *IntegrationJobUseCase) MoveDataJob(dataCorte time.Time) error {
-	if err := uc.MoverEstruturaMercadologica(dataCorte); err != nil {
+	log.Println("MoveDataJob - Início")
+
+	if err := uc.MoverEstruturaMercadologica(); err != nil {
 		return err
 	}
-	if err := uc.MoverProduto(dataCorte); err != nil {
+	if err := uc.MoverProduto(); err != nil {
 		return err
 	}
-	if err := uc.MoverEmbalagem(dataCorte); err != nil {
+	if err := uc.MoverEmbalagem(); err != nil {
 		return err
 	}
-	if err := uc.MoverCombo(dataCorte); err != nil {
+	if err := uc.MoverCombo(); err != nil {
 		return err
 	}
-	if err := uc.MoverPromocao(dataCorte); err != nil {
+	if err := uc.MoverPromocao(); err != nil {
 		return err
 	}
+
+	log.Println("MoveDataJob - Fim")
 	return nil
 }
 
-func (uc *IntegrationJobUseCase) MoverEstruturaMercadologica(dataCorte time.Time) error {
-	return uc.integrationRepo.MoveIntegrationMarketingStructure(dataCorte)
+func (uc *IntegrationJobUseCase) MoverEstruturaMercadologica() error {
+	log.Println("Movendo estrutura mercadológica - Início")
+
+	for {
+		hasRecords, err := uc.integrationRepo.HasMarketingStructureStaging()
+		if err != nil {
+			return fmt.Errorf("erro ao verificar staging estrutura mercadológica: %w", err)
+		}
+		if !hasRecords {
+			break
+		}
+
+		// Criar nova data a cada iteração
+		dataAtualizada := time.Now()
+		if err := uc.integrationRepo.MoveIntegrationMarketingStructure(dataAtualizada); err != nil {
+			return fmt.Errorf("erro ao mover estrutura mercadológica: %w", err)
+		}
+	}
+
+	log.Println("Movendo estrutura mercadológica - Fim")
+	return nil
 }
 
-func (uc *IntegrationJobUseCase) MoverProduto(dataCorte time.Time) error {
-	return uc.integrationRepo.MoveIntegrationProductStaging(dataCorte)
+func (uc *IntegrationJobUseCase) MoverProduto() error {
+	log.Println("Movendo produtos - Início")
+
+	for {
+		hasRecords, err := uc.integrationRepo.HasProductStaging()
+		if err != nil {
+			return fmt.Errorf("erro ao verificar staging produto: %w", err)
+		}
+		if !hasRecords {
+			break
+		}
+
+		// Criar nova data a cada iteração
+		dataAtualizada := time.Now()
+		if err := uc.integrationRepo.MoveIntegrationProductStaging(dataAtualizada); err != nil {
+			return fmt.Errorf("erro ao mover produto: %w", err)
+		}
+	}
+
+	log.Println("Movendo produtos - Fim")
+	return nil
 }
 
-func (uc *IntegrationJobUseCase) MoverEmbalagem(dataCorte time.Time) error {
-	return uc.integrationRepo.MoveIntegrationPackagingStaging(dataCorte)
+func (uc *IntegrationJobUseCase) MoverEmbalagem() error {
+	log.Println("Movendo embalagens - Início")
+
+	for {
+		hasRecords, err := uc.integrationRepo.HasPackagingStaging()
+		if err != nil {
+			return fmt.Errorf("erro ao verificar staging embalagem: %w", err)
+		}
+		if !hasRecords {
+			break
+		}
+
+		// Criar nova data a cada iteração
+		dataAtualizada := time.Now()
+		if err := uc.integrationRepo.MoveIntegrationPackagingStaging(dataAtualizada); err != nil {
+			return fmt.Errorf("erro ao mover embalagem: %w", err)
+		}
+	}
+
+	log.Println("Movendo embalagens - Fim")
+	return nil
 }
 
-func (uc *IntegrationJobUseCase) MoverCombo(dataCorte time.Time) error {
-	return uc.integrationRepo.MoveIntegrationComboStaging(dataCorte)
+func (uc *IntegrationJobUseCase) MoverCombo() error {
+	log.Println("Movendo combos - Início")
+
+	for {
+		hasRecords, err := uc.integrationRepo.HasComboStaging()
+		if err != nil {
+			return fmt.Errorf("erro ao verificar staging combo: %w", err)
+		}
+		if !hasRecords {
+			break
+		}
+
+		// Criar nova data a cada iteração
+		dataAtualizada := time.Now()
+		if err := uc.integrationRepo.MoveIntegrationComboStaging(dataAtualizada); err != nil {
+			return fmt.Errorf("erro ao mover combo: %w", err)
+		}
+	}
+
+	log.Println("Movendo combos - Fim")
+	return nil
 }
 
-func (uc *IntegrationJobUseCase) MoverPromocao(dataCorte time.Time) error {
-	return uc.integrationRepo.MoveIntegrationPromotionStaging(dataCorte)
+func (uc *IntegrationJobUseCase) MoverPromocao() error {
+	log.Println("Movendo promoções - Início")
+
+	for {
+		hasRecords, err := uc.integrationRepo.HasPromotionStaging()
+		if err != nil {
+			return fmt.Errorf("erro ao verificar staging promoção: %w", err)
+		}
+		if !hasRecords {
+			break
+		}
+
+		// Criar nova data a cada iteração
+		dataAtualizada := time.Now()
+		if err := uc.integrationRepo.MoveIntegrationPromotionStaging(dataAtualizada); err != nil {
+			return fmt.Errorf("erro ao mover promoção: %w", err)
+		}
+	}
+
+	log.Println("Movendo promoções - Fim")
+	return nil
 }
 
 // UpdateExpirationSlaRequestsJob updates expired SLA requests
 func (uc *IntegrationJobUseCase) UpdateExpirationSlaRequestsJob() error {
-	return uc.integrationRepo.UpdateExpiredSlaSolicitation()
+	log.Println("Atualizar vencimento SLA solicitações - Início")
+	err := uc.integrationRepo.UpdateExpiredSlaSolicitation()
+	if err != nil {
+		return fmt.Errorf("erro ao atualizar vencimento SLA: %w", err)
+	}
+	log.Println("Atualizar vencimento SLA solicitações - Fim")
+	return nil
 }

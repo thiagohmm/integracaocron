@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 
 	"github.com/thiagohmm/integracaocron/domain/entities"
 )
@@ -46,11 +47,31 @@ func (r *ProductIntegrationRepository) GetIntegrRmsProductsIn() ([]entities.Inte
 
 // RemoveProductService removes a processed product integration record
 func (r *ProductIntegrationRepository) RemoveProductService(rms entities.IntegrRmsProductIn) error {
+	// Iniciar transação
+	tx, err := r.db.Begin()
+	if err != nil {
+		return fmt.Errorf("error beginning transaction: %w", err)
+	}
+	defer tx.Rollback() // Rollback automático se não der commit
+
+	// Executar DELETE
 	query := `DELETE FROM INTEGRRMSPRODUTOIN WHERE IPR_ID = :1`
-	_, err := r.db.Exec(query, rms.IprID)
+	result, err := tx.Exec(query, rms.IprID)
 	if err != nil {
 		return fmt.Errorf("error removing product service: %w", err)
 	}
+
+	// Verificar se deletou algo
+	rowsAffected, _ := result.RowsAffected()
+	if rowsAffected == 0 {
+		log.Printf("⚠️  No rows deleted for IPR_ID: %v", rms.IprID)
+	}
+
+	// Commit da transação
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("error committing delete: %w", err)
+	}
+
 	return nil
 }
 
@@ -297,14 +318,47 @@ func (r *ProductIntegrationRepository) GetBrandDescByID(id *int) ([]entities.Bra
 }
 
 // DoPackageProductIntegration executes Oracle stored procedure for product integration
+// A procedure Oracle espera que o registro exista em INTEGRRMSPRODUTOIN com JSON válido
 func (r *ProductIntegrationRepository) DoPackageProductIntegration(iprID int) (*entities.LogValidate, error) {
-	query := `BEGIN pkg_integra_produto.prc_integra_hermes(:1); END;`
+	log.Printf("🔍 Validating IPR_ID %d before calling Oracle procedure", iprID)
 
-	log.Printf("Executing Oracle procedure: pkg_integra_produto.prc_integra_hermes with IPR_ID: %d", iprID)
+	// 🛡️ VALIDAÇÃO CRÍTICA: Verificar se o JSON existe e não está vazio
+	// A procedure Oracle pkg_integra_produto.prc_integra_hermes espera encontrar
+	// o registro em INTEGRRMSPRODUTOIN e lança ORA-20000 se JSON estiver vazio
+	var jsonData sql.NullString
+	checkQuery := `SELECT JSON FROM INTEGRRMSPRODUTOIN WHERE IPR_ID = :1`
+	err := r.db.QueryRow(checkQuery, iprID).Scan(&jsonData)
+
+	if err == sql.ErrNoRows {
+		// Registro não encontrado - pode ser um product_id direto, não IPR_ID
+		log.Printf("⚠️ IPR_ID %d not found in INTEGRRMSPRODUTOIN, proceeding anyway (may be product_id)", iprID)
+	} else if err != nil {
+		log.Printf("❌ ERROR checking JSON for IPR_ID %d: %v", iprID, err)
+		return &entities.LogValidate{
+			Success: false,
+			Message: fmt.Sprintf("Erro ao verificar JSON: %v", err),
+		}, nil
+	} else {
+		// Registro encontrado - validar JSON
+		if !jsonData.Valid || strings.TrimSpace(jsonData.String) == "" {
+			msg := fmt.Sprintf("JSON vazio para IPR_ID %d - não é possível processar", iprID)
+			log.Printf("❌ VALIDATION FAILED: %s", msg)
+
+			return &entities.LogValidate{
+				Success: false,
+				Message: msg,
+			}, nil
+		}
+		log.Printf("✅ JSON validation passed for IPR_ID %d (length: %d bytes)", iprID, len(jsonData.String))
+	}
+
+	// Chamar procedure Oracle
+	query := `BEGIN pkg_integra_produto.prc_integra_hermes(:1); END;`
+	log.Printf("📞 Executing Oracle procedure: pkg_integra_produto.prc_integra_hermes with IPR_ID: %d", iprID)
 
 	result, err := r.db.Exec(query, iprID)
 	if err != nil {
-		log.Printf("ERROR executing pkg_integra_produto.prc_integra_hermes for IPR_ID %d: %v", iprID, err)
+		log.Printf("❌ ERROR executing pkg_integra_produto.prc_integra_hermes for IPR_ID %d: %v", iprID, err)
 		return &entities.LogValidate{
 			Success: false,
 			Message: err.Error(),
@@ -312,7 +366,7 @@ func (r *ProductIntegrationRepository) DoPackageProductIntegration(iprID int) (*
 	}
 
 	rowsAffected, _ := result.RowsAffected()
-	log.Printf("Oracle procedure executed successfully for IPR_ID %d (rows affected: %d)", iprID, rowsAffected)
+	log.Printf("✅ Oracle procedure executed successfully for IPR_ID %d (rows affected: %d)", iprID, rowsAffected)
 
 	return &entities.LogValidate{
 		Success: true,
@@ -322,7 +376,7 @@ func (r *ProductIntegrationRepository) DoPackageProductIntegration(iprID int) (*
 
 // SaveLogIntegration saves integration log
 func (r *ProductIntegrationRepository) SaveLogIntegration(log entities.LogIntegrRMS) error {
-	query := `INSERT INTO LOG_INTEGR_RMS (TRANSACAO, TABELA, DATARECEBIMENTO, DATAPROCESSAMENTO, 
+	query := `INSERT INTO LOGS_INTEGR_RMS (TRANSACAO, TABELA, DATARECEBIMENTO, DATAPROCESSAMENTO, 
 			  STATUSPROCESSAMENTO, JSON, DESCRICAOERRO) 
 			  VALUES (:1, :2, :3, :4, :5, :6, :7)`
 

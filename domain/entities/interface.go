@@ -92,6 +92,11 @@ type IntegrationRepository interface {
 	CheckPackagingIntegration() (bool, error)
 	CheckComboIntegration() (bool, error)
 	CheckPromotionIntegration() (bool, error)
+	HasMarketingStructureStaging() (bool, error)
+	HasProductStaging() (bool, error)
+	HasPackagingStaging() (bool, error)
+	HasComboStaging() (bool, error)
+	HasPromotionStaging() (bool, error)
 	MoveIntegrationMarketingStructure(dataCorte time.Time) error
 	MoveIntegrationProductStaging(dataCorte time.Time) error
 	MoveIntegrationPackagingStaging(dataCorte time.Time) error
@@ -111,4 +116,5 @@ type NetworkRepository interface {
 	GetNetworkReplicadosByDealer(idRevendedor int) ([]interface{}, error)
 	GetProductsByReplicateNetworkServiceNew(idRevendedor int) ([]ProductSelect, error)
 	GetProductsByReplicateNetworkReplicate(idProduto int) ([]ProductSelect, error)
+	GetProductsByReplicateNetworkNew(idRevendedor int, idProduto *int, produtosReplicados string) error
 }

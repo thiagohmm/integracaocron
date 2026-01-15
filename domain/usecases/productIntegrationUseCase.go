@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/thiagohmm/integracaocron/domain/entities"
@@ -51,6 +52,7 @@ func (uc *ProductIntegrationUseCase) IntegrateProductService(idProduto, idDealer
 }
 
 // ImportProductIntegration is the main function that imports product integrations
+// Segue o mesmo fluxo do TypeScript: busca de INTEGRRMSPRODUTOIN, chama dopkg_produto(IPR_ID), remove registro
 func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 	ctx := context.Background()
 	ctx, span := tracing.StartSpan(ctx, "ImportProductIntegration")
@@ -58,18 +60,18 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 
 	log.Println("Starting product integration import process")
 
-	// Get products from STAGING table, not from input table
-	productsStagingRecords, err := uc.repo.GetAllProductIntegrationStagingRecords()
+	// ✅ FLUXO CORRETO: Buscar de INTEGRRMSPRODUTOIN (tabela de entrada) igual ao TypeScript
+	integrRmsProductsIn, err := uc.repo.GetIntegrRmsProductsIn()
 	if err != nil {
 		tracing.RecordError(ctx, err)
-		return false, fmt.Errorf("error getting products from staging: %w", err)
+		return false, fmt.Errorf("error getting products from INTEGRRMSPRODUTOIN: %w", err)
 	}
 
-	log.Printf("Found %d product(s) to process from INTEGRACAOPRODUTOSTAGING", len(productsStagingRecords))
-	tracing.AddIntAttribute(ctx, "total_products", len(productsStagingRecords))
+	log.Printf("Found %d product(s) to process from INTEGRRMSPRODUTOIN", len(integrRmsProductsIn))
+	tracing.AddIntAttribute(ctx, "total_products", len(integrRmsProductsIn))
 
-	if len(productsStagingRecords) == 0 {
-		log.Println("No products found to process in staging table. Exiting.")
+	if len(integrRmsProductsIn) == 0 {
+		log.Println("No products found to process in INTEGRRMSPRODUTOIN. Exiting.")
 		return true, nil
 	}
 
@@ -91,7 +93,7 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 
 	// ✅ CORREÇÃO: Usar contadores ao invés de array para economizar memória
 	var successCount, failureCount int
-	totalProducts := len(productsStagingRecords)
+	totalProducts := len(integrRmsProductsIn)
 
 	// ✅ CORREÇÃO: Processar em batches para liberar memória periodicamente
 	const batchSize = 100
@@ -101,7 +103,7 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 			batchEnd = totalProducts
 		}
 
-		batch := productsStagingRecords[batchStart:batchEnd]
+		batch := integrRmsProductsIn[batchStart:batchEnd]
 		log.Printf("Processing batch %d-%d of %d products", batchStart+1, batchEnd, totalProducts)
 
 		// 🔍 Tracing: Criar span para o batch
@@ -110,71 +112,78 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 		tracing.AddIntAttribute(batchCtx, "batch.end", batchEnd)
 		tracing.AddIntAttribute(batchCtx, "batch.size", len(batch))
 
-		for i, stagingRecord := range batch {
+		for i, rms := range batch {
 			actualIndex := batchStart + i + 1
 
 			// 🔍 Tracing: Criar span para cada produto
 			productCtx, productSpan := tracing.StartSpan(batchCtx, "ProcessSingleProduct")
-			tracing.AddInt64Attribute(productCtx, "staging_id", int64(stagingRecord.IdIntegrationProdutoStaging))
-			tracing.AddInt64Attribute(productCtx, "product_id", int64(stagingRecord.IdProduto))
-			tracing.AddInt64Attribute(productCtx, "dealer_id", int64(stagingRecord.IdRevendedor))
+			if rms.IprID != nil {
+				tracing.AddInt64Attribute(productCtx, "ipr_id", int64(*rms.IprID))
+			}
 			tracing.AddIntAttribute(productCtx, "product_index", actualIndex)
 
-			// Wrap each product processing in a func to catch panics
+			// ✅ FLUXO CORRETO: Processar igual ao TypeScript
 			func() {
 				defer productSpan.End()
 				defer func() {
 					if r := recover(); r != nil {
-						log.Printf("PANIC recovered while processing product %d/%d (Staging ID: %d): %v",
-							actualIndex, totalProducts, stagingRecord.IdIntegrationProdutoStaging, r)
+						iprIDStr := "nil"
+						if rms.IprID != nil {
+							iprIDStr = fmt.Sprintf("%d", *rms.IprID)
+						}
+						log.Printf("PANIC recovered while processing product %d/%d (IPR_ID: %s): %v",
+							actualIndex, totalProducts, iprIDStr, r)
 						failureCount++
 
 						// 🔍 Tracing: Registrar panic
 						tracing.AddEvent(productCtx, "panic.recovered",
 							tracing.StringAttr("panic_value", fmt.Sprintf("%v", r)),
-							tracing.IntAttr("staging_id", stagingRecord.IdIntegrationProdutoStaging))
+							tracing.StringAttr("ipr_id", iprIDStr))
 						tracing.SetStatus(productCtx, 2, fmt.Sprintf("PANIC: %v", r)) // codes.Error = 2
 
-						// Log panic error (sem duplicar JSON na memória)
+						// Log panic error
 						logErro := entities.QueueMessage{
 							Tabela: "LogsIntegrRMS",
-							Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "DESCRICAOERRO"},
+							Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
 							Values: []interface{}{
-								"STAGING",
+								"IN",
 								"PRODUTOS",
-								stagingRecord.DataAtualizacao,
+								rms.DataRecebimento,
 								time.Now(),
-								0, // Status 0 = error
-								fmt.Sprintf("PANIC: %v (Staging ID: %d)", r, stagingRecord.IdIntegrationProdutoStaging),
+								1, // Status 1 = error (igual TypeScript)
+								rms.JSON,
+								fmt.Sprintf("PANIC: %v", r),
 							},
 						}
 						uc.repo.SendToQueue(logErro)
 					}
 				}()
 
-				log.Printf("Processing product %d/%d (Staging ID: %d, Product ID: %d, Dealer ID: %d)",
-					actualIndex, totalProducts,
-					stagingRecord.IdIntegrationProdutoStaging,
-					stagingRecord.IdProduto,
-					stagingRecord.IdRevendedor)
+				iprIDLog := "nil"
+				if rms.IprID != nil {
+					iprIDLog = fmt.Sprintf("%d", *rms.IprID)
+				}
+				log.Printf("Processing product %d/%d (IPR_ID: %s)", actualIndex, totalProducts, iprIDLog)
 
-				result := uc.processProductFromStaging(stagingRecord)
+				// ✅ FLUXO CORRETO: Chama processProductIntegration igual TypeScript
+				result := uc.processProductIntegration(rms)
 				log.Printf("Product %d processing result - Success: %v, Message: %s", actualIndex, result.Success, result.Message)
 
 				// 🔍 Tracing: Registrar resultado do processamento
 				tracing.AddBoolAttribute(productCtx, "processing.success", result.Success)
 				tracing.AddStringAttribute(productCtx, "processing.message", result.Message)
 
-				// ✅ CORREÇÃO: Log simplificado sem duplicar JSON completo
+				// ✅ FLUXO CORRETO: Log igual TypeScript
 				logErro := entities.QueueMessage{
 					Tabela: "LogsIntegrRMS",
-					Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "DESCRICAOERRO"},
+					Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
 					Values: []interface{}{
-						"STAGING",
+						"IN",
 						"PRODUTOS",
-						stagingRecord.DataAtualizacao,
+						rms.DataRecebimento,
 						time.Now(),
 						uc.getStatusFromResult(result),
+						rms.JSON,
 						uc.getMessageFromResult(result),
 					},
 				}
@@ -185,14 +194,21 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 					tracing.RecordError(productCtx, err)
 				}
 
-				// ✅ CORREÇÃO: Incrementar contadores ao invés de append em array
+				// ✅ FLUXO CORRETO: Remove registro SEMPRE (igual TypeScript)
+				if rms.IprID != nil {
+					if err := uc.repo.RemoveProductService(rms); err != nil {
+						log.Printf("ERROR: Failed to remove IPR_ID %d from INTEGRRMSPRODUTOIN: %v", *rms.IprID, err)
+					}
+				}
+
+				// ✅ Incrementar contadores
 				if result.Success {
 					successCount++
-					log.Printf("✅ Product %d processed successfully from INTEGRACAOPRODUTOSTAGING", actualIndex)
+					log.Printf("✅ Product %d processed successfully (IPR_ID: %s)", actualIndex, iprIDLog)
 					tracing.SetStatus(productCtx, 1, "Success") // codes.Ok = 1
 				} else {
 					failureCount++
-					log.Printf("❌ Product %d processing FAILED: %s", actualIndex, result.Message)
+					log.Printf("❌ Product %d processing FAILED: %s (IPR_ID: %s)", actualIndex, result.Message, iprIDLog)
 					log.Printf("⏩ Continuing to next product...")
 					tracing.SetStatus(productCtx, 2, result.Message) // codes.Error = 2
 				}
@@ -239,39 +255,78 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 
 // processProductIntegration processes a single product integration
 func (uc *ProductIntegrationUseCase) processProductIntegration(rms entities.IntegrRmsProductIn) *entities.LogValidate {
+	ctx := context.Background()
+	ctx, span := tracing.StartSpan(ctx, "ProcessProductIntegration")
+	defer span.End()
+
+	// 🔍 Tracing: Registrar IPR_ID
+	if rms.IprID != nil {
+		tracing.AddInt64Attribute(ctx, "ipr_id", int64(*rms.IprID))
+	}
+
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Panic recovered in processProductIntegration: %v", r)
+			tracing.AddEvent(ctx, "panic.recovered", tracing.StringAttr("panic_value", fmt.Sprintf("%v", r)))
 		}
 	}()
+
+	// Validar se JSON não está vazio
+	if strings.TrimSpace(rms.JSON) == "" {
+		msg := "JSON vazio - não é possível processar"
+		log.Printf("❌ ERROR: %s for IPR_ID %v", msg, rms.IprID)
+		tracing.AddEvent(ctx, "validation.failed", tracing.StringAttr("reason", "empty_json"))
+		tracing.SetStatus(ctx, 2, msg) // codes.Error = 2
+		return &entities.LogValidate{
+			Success: false,
+			Message: msg,
+		}
+	}
 
 	// Parse JSON
 	var produto entities.ProductInJson
 	if err := json.Unmarshal([]byte(rms.JSON), &produto); err != nil {
-		log.Printf("ERROR: Failed to parse JSON for IPR_ID %v: %v", rms.IprID, err)
+		log.Printf("❌ ERROR: Failed to parse JSON for IPR_ID %v: %v", rms.IprID, err)
+		tracing.RecordError(ctx, err)
+		tracing.AddEvent(ctx, "json.parse.failed")
 		return &entities.LogValidate{
 			Success: false,
 			Message: fmt.Sprintf("Error parsing JSON: %v", err),
 		}
 	}
 
-	log.Printf("JSON parsed successfully for IPR_ID %v, calling Oracle procedure pkg_integra_produto.prc_integra_hermes", rms.IprID)
+	log.Printf("✅ JSON parsed successfully for IPR_ID %v, calling Oracle procedure pkg_integra_produto.prc_integra_hermes", rms.IprID)
+	tracing.AddEvent(ctx, "json.parsed.success")
 
 	// Call Oracle stored procedure to handle the integration
 	if rms.IprID != nil {
 		result, err := uc.repo.DoPackageProductIntegration(*rms.IprID)
 		if err != nil {
-			log.Printf("ERROR: Oracle procedure failed for IPR_ID %v: %v", rms.IprID, err)
+			log.Printf("❌ ERROR: Oracle procedure failed for IPR_ID %v: %v", rms.IprID, err)
+			tracing.RecordError(ctx, err)
+			tracing.SetStatus(ctx, 2, fmt.Sprintf("Oracle error: %v", err))
 			return &entities.LogValidate{
 				Success: false,
 				Message: fmt.Sprintf("Error executing Oracle procedure: %v", err),
 			}
 		}
 		log.Printf("Oracle procedure completed for IPR_ID %v - Success: %v, Message: %s", rms.IprID, result.Success, result.Message)
+
+		// 🔍 Tracing: Registrar resultado
+		tracing.AddBoolAttribute(ctx, "oracle.success", result.Success)
+		tracing.AddStringAttribute(ctx, "oracle.message", result.Message)
+
+		if result.Success {
+			tracing.SetStatus(ctx, 1, "Success") // codes.Ok = 1
+		} else {
+			tracing.SetStatus(ctx, 2, result.Message) // codes.Error = 2
+		}
+
 		return result
 	}
 
-	log.Printf("ERROR: Invalid IPR_ID (nil) for product")
+	log.Printf("❌ ERROR: Invalid IPR_ID (nil) for product")
+	tracing.AddEvent(ctx, "validation.failed", tracing.StringAttr("reason", "nil_ipr_id"))
 	return &entities.LogValidate{
 		Success: false,
 		Message: "Invalid IPR_ID",

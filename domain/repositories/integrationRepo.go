@@ -49,14 +49,15 @@ func (r *IntegrationRepositoryImpl) ClearIntegrationPackagingByCutOffDate(dataCo
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var query string
-	if len(expurgo) > 0 && expurgo[0] == "SIM" {
-		query = `DELETE FROM INTEGRACAOEMBALAGEM WHERE DATAATUALIZACAO < :1`
-	} else {
-		query = `UPDATE INTEGRACAOEMBALAGEM SET ENVIANDO = '0' WHERE DATAATUALIZACAO < :1`
+	// Set default value
+	fazExpurgo := "NAO"
+	if len(expurgo) > 0 {
+		fazExpurgo = expurgo[0]
 	}
 
-	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	query := `BEGIN sp_LimparIntegracaoEmbalagemCorte(:1, :2); END;`
+
+	_, err := r.db.ExecContext(ctx, query, dataCorte, fazExpurgo)
 	if err != nil {
 		log.Printf("Erro ao limpar integração embalagem: %v", err)
 		return fmt.Errorf("erro ao limpar integração embalagem: %w", err)
@@ -69,14 +70,15 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoEstruturaMercadolo
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var query string
-	if len(expurgo) > 0 && expurgo[0] == "SIM" {
-		query = `DELETE FROM INTEGRACAOESTRUTURAMERCADOLOGICA WHERE DATAATUALIZACAO < :1`
-	} else {
-		query = `UPDATE INTEGRACAOESTRUTURAMERCADOLOGICA SET ENVIANDO = '0' WHERE DATAATUALIZACAO < :1`
+	// Set default value
+	fazExpurgo := "NAO"
+	if len(expurgo) > 0 {
+		fazExpurgo = expurgo[0]
 	}
 
-	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	query := `BEGIN sp_limparintegracaoestruturamercadologicacorte(:1, :2); END;`
+
+	_, err := r.db.ExecContext(ctx, query, dataCorte, fazExpurgo)
 	if err != nil {
 		log.Printf("Erro ao remover transação estrutura mercadológica: %v", err)
 		return fmt.Errorf("erro ao remover transação estrutura mercadológica: %w", err)
@@ -89,14 +91,15 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoProduto(dataCorte 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var query string
-	if len(expurgo) > 0 && expurgo[0] == "SIM" {
-		query = `DELETE FROM INTEGRACAOPRODUTO WHERE DATAATUALIZACAO < :1`
-	} else {
-		query = `UPDATE INTEGRACAOPRODUTO SET ENVIANDO = '0' WHERE DATAATUALIZACAO < :1`
+	// Set default value
+	fazExpurgo := "NAO"
+	if len(expurgo) > 0 {
+		fazExpurgo = expurgo[0]
 	}
 
-	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	query := `BEGIN sp_limparintegracaoprodutocorte(:1, :2); END;`
+
+	_, err := r.db.ExecContext(ctx, query, dataCorte, fazExpurgo)
 	if err != nil {
 		log.Printf("Erro ao remover transação produto: %v", err)
 		return fmt.Errorf("erro ao remover transação produto: %w", err)
@@ -109,14 +112,15 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoPromocao(dataCorte
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	var query string
-	if len(expurgo) > 0 && expurgo[0] == "SIM" {
-		query = `DELETE FROM INTEGRACAOPROMOCAO WHERE DATAATUALIZACAO < :1`
-	} else {
-		query = `UPDATE INTEGRACAOPROMOCAO SET ENVIANDO = '0' WHERE DATAATUALIZACAO < :1`
+	// Set default value
+	fazExpurgo := "NAO"
+	if len(expurgo) > 0 {
+		fazExpurgo = expurgo[0]
 	}
 
-	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	query := `BEGIN sp_limparintegracaopromocaocorte(:1, :2); END;`
+
+	_, err := r.db.ExecContext(ctx, query, dataCorte, fazExpurgo)
 	if err != nil {
 		log.Printf("Erro ao remover transação promoção: %v", err)
 		return fmt.Errorf("erro ao remover transação promoção: %w", err)
@@ -202,6 +206,82 @@ func (r *IntegrationRepositoryImpl) CheckPromotionIntegration() (bool, error) {
 	if err != nil {
 		log.Printf("Erro ao verificar integração de promoção: %v", err)
 		return false, fmt.Errorf("erro ao verificar integração de promoção: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+// Check Staging Tables methods
+func (r *IntegrationRepositoryImpl) HasMarketingStructureStaging() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	query := `SELECT COUNT(*) FROM INTEGRACAOESTRUTURAMERCADOLOGICASTAGING`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		log.Printf("Erro ao verificar staging estrutura mercadológica: %v", err)
+		return false, fmt.Errorf("erro ao verificar staging estrutura mercadológica: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+func (r *IntegrationRepositoryImpl) HasProductStaging() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	query := `SELECT COUNT(*) FROM INTEGRACAOPRODUTOSTAGING`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		log.Printf("Erro ao verificar staging produto: %v", err)
+		return false, fmt.Errorf("erro ao verificar staging produto: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+func (r *IntegrationRepositoryImpl) HasPackagingStaging() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	query := `SELECT COUNT(*) FROM INTEGRACAOEMBALAGEMSTAGING`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		log.Printf("Erro ao verificar staging embalagem: %v", err)
+		return false, fmt.Errorf("erro ao verificar staging embalagem: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+func (r *IntegrationRepositoryImpl) HasComboStaging() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	query := `SELECT COUNT(*) FROM INTEGRACAOCOMBOSTAGING`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		log.Printf("Erro ao verificar staging combo: %v", err)
+		return false, fmt.Errorf("erro ao verificar staging combo: %w", err)
+	}
+
+	return count > 0, nil
+}
+
+func (r *IntegrationRepositoryImpl) HasPromotionStaging() (bool, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	query := `SELECT COUNT(*) FROM INTEGRACAOPROMOCAOSTAGING`
+
+	var count int
+	err := r.db.QueryRowContext(ctx, query).Scan(&count)
+	if err != nil {
+		log.Printf("Erro ao verificar staging promoção: %v", err)
+		return false, fmt.Errorf("erro ao verificar staging promoção: %w", err)
 	}
 
 	return count > 0, nil
