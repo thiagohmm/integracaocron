@@ -311,6 +311,31 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 				tracing.RecordError(ctx, err)
 				return fmt.Errorf("erro ao processar promoções pendentes: %w", err), ""
 			}
+
+			if l.PromotionNormalizationUC == nil {
+				log.Printf("PromotionNormalizationUC não foi inicializado")
+				return fmt.Errorf("PromotionNormalizationUC não foi inicializado"), ""
+			}
+
+			if l.IntegrationUc == nil {
+				log.Printf("IntegrationUc não foi inicializado")
+				return fmt.Errorf("IntegrationUc não foi inicializado"), ""
+			}
+
+			result, err := l.PromotionNormalizationUC.NormalizePromotions()
+			if err != nil {
+				log.Printf("Erro ao processar normalização de promoções: %v", err)
+				return fmt.Errorf("erro ao processar normalização de promoções: %w", err), ""
+			}
+
+			if !result.Success {
+				log.Printf("Normalização de promoções concluída com alguns erros: %s", result.Message)
+				return fmt.Errorf("normalização de promoções concluída com alguns erros: %s", result.Message), ""
+			}
+
+			log.Printf("Normalização de promoções concluída com sucesso. Processados: %d, Atualizados: %d, Duplicatas removidas: %d",
+				result.ProcessedCount, result.UpdatedCount, result.TotalRemovedDuplicates)
+
 		} else {
 			logger.Info(ctx, "Dados específicos de promoção fornecidos, processando promoção individual")
 			var promocao entities.Promotion
@@ -355,6 +380,28 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 			log.Printf("ProductIntegrationUC não foi inicializado")
 			return fmt.Errorf("ProductIntegrationUC não foi inicializado"), ""
 		}
+
+		err := l.IntegrationUc.IntegrationJob()
+		if err != nil {
+			log.Printf("Erro ao processar integração: %v", err)
+			return fmt.Errorf("erro ao processar integração: %w", err), ""
+		}
+
+		if l.IntegrationUc == nil {
+			log.Printf("IntegrationUc não foi inicializado")
+			return fmt.Errorf("IntegrationUc não foi inicializado"), ""
+		}
+
+		// Usar time.Now() como dataCorte
+		dataCorte := time.Now()
+
+		err = l.productNetworkMain(dataCorte)
+		if err != nil {
+			log.Printf("Erro ao executar ProductNetworkMain: %v", err)
+			return fmt.Errorf("erro ao executar ProductNetworkMain: %w", err), ""
+		}
+
+		log.Printf("Processo ProductNetworkMain concluído com sucesso")
 
 		success, err := l.ProductIntegrationUC.ImportProductIntegration()
 		if err != nil {
