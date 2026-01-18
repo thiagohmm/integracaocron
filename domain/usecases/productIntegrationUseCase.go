@@ -33,18 +33,29 @@ func NewProductIntegrationUseCase(repo *repositories.ProductIntegrationRepositor
 
 // IntegrateProductService integrates a product and its packaging
 func (uc *ProductIntegrationUseCase) IntegrateProductService(idProduto, idDealer int, item entities.ProductSelectIntegration) error {
+	ctx := context.Background()
+	ctx, span := tracing.StartSpan(ctx, "IntegrateProductService")
+	defer span.End()
+	
+	// ✅ Adicionar idproduto para pesquisa no Jaeger
+	tracing.AddProductID(ctx, idProduto)
+	tracing.AddIntAttribute(ctx, "dealer.id", idDealer)
+	
 	jsonPayload, err := json.Marshal(item)
 	if err != nil {
+		tracing.RecordError(ctx, err)
 		return fmt.Errorf("error marshalling product select: %w", err)
 	}
 
 	err = uc.repo.AddOrUpdateStaging(idProduto, idDealer, string(jsonPayload))
 	if err != nil {
+		tracing.RecordError(ctx, err)
 		return fmt.Errorf("error adding or updating product staging: %w", err)
 	}
 
 	err = uc.packagingUseCase.PackagingIntegrateService(idProduto, idDealer)
 	if err != nil {
+		tracing.RecordError(ctx, err)
 		return fmt.Errorf("error integrating packaging: %w", err)
 	}
 
@@ -95,8 +106,10 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 	var successCount, failureCount int
 	totalProducts := len(integrRmsProductsIn)
 
-	// ✅ CORREÇÃO: Processar em batches para liberar memória periodicamente
-	const batchSize = 100
+	// ✅ OTIMIZAÇÃO: Aumentar batch size para melhor throughput
+	const batchSize = 200
+	var processedIDs []*int // Coletar IDs processados para batch delete
+
 	for batchStart := 0; batchStart < totalProducts; batchStart += batchSize {
 		batchEnd := batchStart + batchSize
 		if batchEnd > totalProducts {
@@ -121,6 +134,22 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 				tracing.AddInt64Attribute(productCtx, "ipr_id", int64(*rms.IprID))
 			}
 			tracing.AddIntAttribute(productCtx, "product_index", actualIndex)
+			
+			// ✅ Adicionar idproduto para pesquisa no Jaeger (extrair do JSON se disponível)
+			if rms.JSON != "" {
+				var produto entities.ProductInJson
+				if err := json.Unmarshal([]byte(rms.JSON), &produto); err == nil {
+					if len(produto.ProdutosSelect) > 0 {
+						// Tentar extrair código RMS que pode ser usado como ID
+						codRMS := produto.ProdutosSelect[0].CodRMS.String()
+						if codRMS != "" {
+							if cod, err := strconv.Atoi(codRMS); err == nil {
+								tracing.AddProductID(productCtx, cod)
+							}
+						}
+					}
+				}
+			}
 
 			// ✅ FLUXO CORRETO: Processar igual ao TypeScript
 			func() {
@@ -194,11 +223,9 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 					tracing.RecordError(productCtx, err)
 				}
 
-				// ✅ FLUXO CORRETO: Remove registro SEMPRE (igual TypeScript)
+				// ✅ OTIMIZAÇÃO: Coletar IDs para batch delete ao invés de deletar individualmente
 				if rms.IprID != nil {
-					if err := uc.repo.RemoveProductService(rms); err != nil {
-						log.Printf("ERROR: Failed to remove IPR_ID %d from INTEGRRMSPRODUTOIN: %v", *rms.IprID, err)
-					}
+					processedIDs = append(processedIDs, rms.IprID)
 				}
 
 				// ✅ Incrementar contadores
@@ -219,6 +246,16 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 		tracing.AddIntAttribute(batchCtx, "batch.success_count", successCount)
 		tracing.AddIntAttribute(batchCtx, "batch.failure_count", failureCount)
 		batchSpan.End()
+
+		// ✅ OTIMIZAÇÃO: Batch delete após cada batch de processamento
+		if len(processedIDs) > 0 {
+			if err := uc.repo.RemoveProductsServiceBatch(processedIDs); err != nil {
+				log.Printf("Warning: Error in batch delete: %v", err)
+			} else {
+				log.Printf("Batch deleted %d processed records", len(processedIDs))
+			}
+			processedIDs = nil // Limpar para próximo batch
+		}
 
 		// ✅ CORREÇÃO: Liberar batch da memória após processar
 		batch = nil
@@ -262,6 +299,25 @@ func (uc *ProductIntegrationUseCase) processProductIntegration(rms entities.Inte
 	// 🔍 Tracing: Registrar IPR_ID
 	if rms.IprID != nil {
 		tracing.AddInt64Attribute(ctx, "ipr_id", int64(*rms.IprID))
+	}
+	
+	// ✅ Adicionar idproduto para pesquisa no Jaeger
+	if rms.JSON != "" {
+		var produto entities.ProductInJson
+		if err := json.Unmarshal([]byte(rms.JSON), &produto); err == nil {
+			if len(produto.ProdutosSelect) > 0 {
+				// Tentar extrair código RMS que pode ser usado como ID
+				codRMS := produto.ProdutosSelect[0].CodRMS.String()
+				if codRMS == "" {
+					codRMS = produto.ProdutosSelect[0].Cod.String()
+				}
+				if codRMS != "" {
+					if cod, err := strconv.Atoi(codRMS); err == nil {
+						tracing.AddProductID(ctx, cod)
+					}
+				}
+			}
+		}
 	}
 
 	defer func() {

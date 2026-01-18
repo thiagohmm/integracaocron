@@ -6,6 +6,7 @@ import "time"
 type ProductIntegrationRepository interface {
 	GetIntegrRmsProductsIn() ([]IntegrRmsProductIn, error)
 	RemoveProductService(rms IntegrRmsProductIn) error
+	RemoveProductsServiceBatch(iprIDs []*int) error
 	GetMarketingStructureLevel2(idLevel2 int) (*MarketingStructure, error)
 	GetMarketingStructureLevel4(idLevel4 int) ([]MarketingStructure, error)
 	GetBrandByIndustryName(brandName, industryName string) ([]Brand, error)

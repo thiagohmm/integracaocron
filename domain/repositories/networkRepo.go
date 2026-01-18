@@ -25,7 +25,7 @@ func NewNetworkRepository(db *sql.DB) entities.NetworkRepository {
 
 // GetNetwork retrieves all networks with replication enabled
 func (r *NetworkRepositoryImpl) GetNetwork() ([]entities.Network, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	query := `
@@ -71,7 +71,7 @@ func (r *NetworkRepositoryImpl) GetNetwork() ([]entities.Network, error) {
 
 // ListByAllByIdDealerNew retrieves dealers by ID based on network principal dealer
 func (r *NetworkRepositoryImpl) ListByAllByIdDealerNew(idDealer int) ([]entities.DealerNetwork, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	query := `
@@ -107,7 +107,7 @@ func (r *NetworkRepositoryImpl) ListByAllByIdDealerNew(idDealer int) ([]entities
 
 // ReplicateProductNetwork replicates products for a network
 func (r *NetworkRepositoryImpl) ReplicateProductNetwork(idRede int) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	// This should be implemented based on your business logic
@@ -128,7 +128,7 @@ func (r *NetworkRepositoryImpl) ReplicateProductNetwork(idRede int) error {
 
 // GetNetworkReplicadosByDealer gets replicated data by dealer (limited to first row)
 func (r *NetworkRepositoryImpl) GetNetworkReplicadosByDealer(idRevendedor int) ([]interface{}, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	query := `
@@ -165,7 +165,7 @@ func (r *NetworkRepositoryImpl) GetNetworkReplicadosByDealer(idRevendedor int) (
 
 // GetProductsByReplicateNetworkServiceNew gets products for replication
 func (r *NetworkRepositoryImpl) GetProductsByReplicateNetworkServiceNew(idRevendedor int) ([]entities.ProductSelect, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	query := `SELECT Cod, CODIGO_RMS, ID_PRODUTO FROM Produtos WHERE IdRevendedor = :1 AND StatusReplicacao = 'PENDENTE'`
@@ -224,7 +224,7 @@ func (r *NetworkRepositoryImpl) GetProductsByReplicateNetworkReplicate(idProduto
 // GetProductsByReplicateNetworkNew calls stored procedure to save product integration
 // Equivalent to TypeScript: getProductsByReplicateNetworkNew
 func (r *NetworkRepositoryImpl) GetProductsByReplicateNetworkNew(idRevendedor int, idProduto *int, produtosReplicados string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	query := `BEGIN SP_GRAVARINTEGRACAOPRODUTOSTAGINGPARCIAL(:1, :2, :3); END;`

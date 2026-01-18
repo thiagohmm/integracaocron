@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/thiagohmm/integracaocron/domain/entities"
@@ -361,20 +362,37 @@ func (uc *IntegrationJobUseCase) ReplicateNetworkProductsJob() error {
 			continue
 		}
 
-		// Processar cada loja
+		// ✅ OTIMIZAÇÃO: Processar lojas em batch ao invés de individualmente
+		// Coletar IDs de revendedores para processamento em batch
+		dealerIDs := make([]int, 0, len(lojas))
 		for _, loja := range lojas {
-			// Verificar se existe produto replicado para esta loja
-			_, err := uc.networkRepo.GetNetworkReplicadosByDealer(loja.IdRevendedor)
-			if err != nil {
-				log.Printf("Erro ao verificar produtos replicados para revendedor %d: %v", loja.IdRevendedor, err)
-				continue
-			}
+			dealerIDs = append(dealerIDs, loja.IdRevendedor)
+		}
 
-			// Gravar integração de produtos replicados (stored procedure)
-			err = uc.networkRepo.GetProductsByReplicateNetworkNew(loja.IdRevendedor, nil, "SIM")
+		// Tentar processar em batch se o método existir
+		if len(dealerIDs) > 0 {
+			err = uc.networkRepo.ProcessReplicatedProductsInBatch(dealerIDs, net.IdRede)
 			if err != nil {
-				log.Printf("Erro ao gravar integração para revendedor %d: %v", loja.IdRevendedor, err)
-				continue
+				log.Printf("Erro ao processar batch de revendedores para rede %d: %v", net.IdRede, err)
+				// Fallback: processar individualmente se batch falhar
+				log.Printf("Fazendo fallback para processamento individual de %d lojas", len(lojas))
+				for _, loja := range lojas {
+					// Verificar se existe produto replicado para esta loja
+					_, err := uc.networkRepo.GetNetworkReplicadosByDealer(loja.IdRevendedor)
+					if err != nil {
+						log.Printf("Erro ao verificar produtos replicados para revendedor %d: %v", loja.IdRevendedor, err)
+						continue
+					}
+
+					// Gravar integração de produtos replicados (stored procedure)
+					err = uc.networkRepo.GetProductsByReplicateNetworkNew(loja.IdRevendedor, nil, "SIM")
+					if err != nil {
+						log.Printf("Erro ao gravar integração para revendedor %d: %v", loja.IdRevendedor, err)
+						continue
+					}
+				}
+			} else {
+				log.Printf("Batch processado com sucesso: %d lojas da rede %d", len(lojas), net.IdRede)
 			}
 		}
 	}
@@ -407,23 +425,63 @@ func (uc *IntegrationJobUseCase) processLojasIndividually(lojas []entities.Deale
 }
 
 // MoveDataJob moves data between staging tables
+// ✅ OTIMIZAÇÃO: Processar operações de movimentação em paralelo quando possível
 func (uc *IntegrationJobUseCase) MoveDataJob(dataCorte time.Time) error {
 	log.Println("MoveDataJob - Início")
 
-	if err := uc.MoverEstruturaMercadologica(); err != nil {
-		return err
+	// Criar canal de erros para coletar erros das goroutines
+	errChan := make(chan error, 5)
+	var wg sync.WaitGroup
+
+	// Processar operações independentes em paralelo
+	wg.Add(5)
+	go func() {
+		defer wg.Done()
+		if err := uc.MoverEstruturaMercadologica(); err != nil {
+			errChan <- fmt.Errorf("erro ao mover estrutura mercadológica: %w", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := uc.MoverProduto(); err != nil {
+			errChan <- fmt.Errorf("erro ao mover produto: %w", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := uc.MoverEmbalagem(); err != nil {
+			errChan <- fmt.Errorf("erro ao mover embalagem: %w", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := uc.MoverCombo(); err != nil {
+			errChan <- fmt.Errorf("erro ao mover combo: %w", err)
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		if err := uc.MoverPromocao(); err != nil {
+			errChan <- fmt.Errorf("erro ao mover promoção: %w", err)
+		}
+	}()
+
+	// Aguardar todas as goroutines terminarem
+	wg.Wait()
+	close(errChan)
+
+	// Verificar se houve erros
+	var errors []error
+	for err := range errChan {
+		errors = append(errors, err)
 	}
-	if err := uc.MoverProduto(); err != nil {
-		return err
-	}
-	if err := uc.MoverEmbalagem(); err != nil {
-		return err
-	}
-	if err := uc.MoverCombo(); err != nil {
-		return err
-	}
-	if err := uc.MoverPromocao(); err != nil {
-		return err
+
+	if len(errors) > 0 {
+		log.Printf("MoveDataJob - Erros encontrados: %d", len(errors))
+		for _, err := range errors {
+			log.Printf("  - %v", err)
+		}
+		return fmt.Errorf("erros ao mover dados: %v", errors[0])
 	}
 
 	log.Println("MoveDataJob - Fim")

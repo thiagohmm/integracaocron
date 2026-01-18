@@ -24,7 +24,7 @@ func NewIntegrationRepository(db *sql.DB) entities.IntegrationRepository {
 
 // Transaction removal methods
 func (r *IntegrationRepositoryImpl) RemoveIntegrationCombo(dataCorte time.Time, expurgo ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	// Set default value for expurgo if not provided
@@ -46,7 +46,7 @@ func (r *IntegrationRepositoryImpl) RemoveIntegrationCombo(dataCorte time.Time, 
 }
 
 func (r *IntegrationRepositoryImpl) ClearIntegrationPackagingByCutOffDate(dataCorte time.Time, expurgo ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	// Set default value
@@ -67,7 +67,7 @@ func (r *IntegrationRepositoryImpl) ClearIntegrationPackagingByCutOffDate(dataCo
 }
 
 func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoEstruturaMercadologica(dataCorte time.Time, expurgo ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	// Set default value
@@ -88,7 +88,7 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoEstruturaMercadolo
 }
 
 func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoProduto(dataCorte time.Time, expurgo ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	// Set default value
@@ -109,7 +109,7 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoProduto(dataCorte 
 }
 
 func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoPromocao(dataCorte time.Time, expurgo ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	// Set default value
@@ -131,7 +131,7 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoPromocao(dataCorte
 
 func (r *IntegrationRepositoryImpl) CheckMarketingStructure() (bool, error) {
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	query := `SELECT COUNT(*) FROM INTEGRACAOESTRUTURAMERCADOLOGICA WHERE ENVIANDO = '1'`
@@ -148,7 +148,7 @@ func (r *IntegrationRepositoryImpl) CheckMarketingStructure() (bool, error) {
 
 func (r *IntegrationRepositoryImpl) CheckProductIntegration() (bool, error) {
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	query := `SELECT COUNT(*) FROM INTEGRACAOPRODUTO WHERE ENVIANDO = '1'`
@@ -165,7 +165,7 @@ func (r *IntegrationRepositoryImpl) CheckProductIntegration() (bool, error) {
 
 func (r *IntegrationRepositoryImpl) CheckPackagingIntegration() (bool, error) {
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	query := `SELECT COUNT(*) FROM INTEGRACAOEMBALAGEM WHERE ENVIANDO = '1'`
 
@@ -181,7 +181,7 @@ func (r *IntegrationRepositoryImpl) CheckPackagingIntegration() (bool, error) {
 
 func (r *IntegrationRepositoryImpl) CheckComboIntegration() (bool, error) {
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	query := `SELECT COUNT(*) FROM INTEGRACAOCOMBO WHERE ENVIANDO = '1'`
 
@@ -197,7 +197,7 @@ func (r *IntegrationRepositoryImpl) CheckComboIntegration() (bool, error) {
 
 func (r *IntegrationRepositoryImpl) CheckPromotionIntegration() (bool, error) {
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	query := `SELECT COUNT(*) FROM INTEGRACAOPROMOCAO WHERE ENVIANDO = '1'`
 
@@ -213,7 +213,7 @@ func (r *IntegrationRepositoryImpl) CheckPromotionIntegration() (bool, error) {
 
 // Check Staging Tables methods
 func (r *IntegrationRepositoryImpl) HasMarketingStructureStaging() (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	query := `SELECT COUNT(*) FROM INTEGRACAOESTRUTURAMERCADOLOGICASTAGING`
 
@@ -228,7 +228,7 @@ func (r *IntegrationRepositoryImpl) HasMarketingStructureStaging() (bool, error)
 }
 
 func (r *IntegrationRepositoryImpl) HasProductStaging() (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	query := `SELECT COUNT(*) FROM INTEGRACAOPRODUTOSTAGING`
 
@@ -243,7 +243,7 @@ func (r *IntegrationRepositoryImpl) HasProductStaging() (bool, error) {
 }
 
 func (r *IntegrationRepositoryImpl) HasPackagingStaging() (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	query := `SELECT COUNT(*) FROM INTEGRACAOEMBALAGEMSTAGING`
 
@@ -258,7 +258,7 @@ func (r *IntegrationRepositoryImpl) HasPackagingStaging() (bool, error) {
 }
 
 func (r *IntegrationRepositoryImpl) HasComboStaging() (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	query := `SELECT COUNT(*) FROM INTEGRACAOCOMBOSTAGING`
 
@@ -273,7 +273,7 @@ func (r *IntegrationRepositoryImpl) HasComboStaging() (bool, error) {
 }
 
 func (r *IntegrationRepositoryImpl) HasPromotionStaging() (bool, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	query := `SELECT COUNT(*) FROM INTEGRACAOPROMOCAOSTAGING`
 
@@ -289,7 +289,7 @@ func (r *IntegrationRepositoryImpl) HasPromotionStaging() (bool, error) {
 
 // Data movement methods
 func (r *IntegrationRepositoryImpl) MoveIntegrationMarketingStructure(dataCorte time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	query := `BEGIN sp_MoverStagingEstruturaMercadologica(:1); END;`
@@ -305,7 +305,7 @@ func (r *IntegrationRepositoryImpl) MoveIntegrationMarketingStructure(dataCorte 
 }
 
 func (r *IntegrationRepositoryImpl) MoveIntegrationProductStaging(dataCorte time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	query := `BEGIN sp_MoverStagingProduto(:1); END;`
@@ -321,7 +321,7 @@ func (r *IntegrationRepositoryImpl) MoveIntegrationProductStaging(dataCorte time
 }
 
 func (r *IntegrationRepositoryImpl) MoveIntegrationPackagingStaging(dataCorte time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	query := `BEGIN sp_MoverStagingEmbalagem(:1); END;`
@@ -337,7 +337,7 @@ func (r *IntegrationRepositoryImpl) MoveIntegrationPackagingStaging(dataCorte ti
 }
 
 func (r *IntegrationRepositoryImpl) MoveIntegrationComboStaging(dataCorte time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	query := `BEGIN sp_MoverStagingCombo(:1); END;`
@@ -353,7 +353,7 @@ func (r *IntegrationRepositoryImpl) MoveIntegrationComboStaging(dataCorte time.T
 }
 
 func (r *IntegrationRepositoryImpl) MoveIntegrationPromotionStaging(dataCorte time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	query := `BEGIN sp_MoverStagingPromocao(:1); END;`
@@ -370,7 +370,7 @@ func (r *IntegrationRepositoryImpl) MoveIntegrationPromotionStaging(dataCorte ti
 
 // Expiry methods
 func (r *IntegrationRepositoryImpl) GetIntegrationUpdateComboByDate(dataCorte time.Time) ([]entities.IntegrationCombo, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	query := `
@@ -409,7 +409,7 @@ func (r *IntegrationRepositoryImpl) GetIntegrationUpdateComboByDate(dataCorte ti
 }
 
 func (r *IntegrationRepositoryImpl) DeleteIntegrationCombo(idIntegracaoCombo int) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	query := `DELETE FROM INTEGRACAOCOMBO WHERE IDINTEGRACAOCOMBO = :1`
@@ -424,7 +424,7 @@ func (r *IntegrationRepositoryImpl) DeleteIntegrationCombo(idIntegracaoCombo int
 }
 
 func (r *IntegrationRepositoryImpl) UpdateExpiredSlaSolicitation() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
 	query := `BEGIN sp_AtualizarVencimentoSlaSolicitacoes(); END;`

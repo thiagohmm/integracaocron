@@ -355,6 +355,9 @@ func (l *Listener) processMessage(msg amqp.Delivery) (error, string) {
 				return fmt.Errorf("IPM_ID inválido: não é possível processar promoção com ID 0"), ""
 			}
 
+			// ✅ Adicionar idpromocao para pesquisa no Jaeger
+			tracing.AddPromotionID(ctx, promocao.IPM_ID)
+
 			err = l.PromocaoUC.ProcessarPromocao(promocao)
 			if err != nil {
 				log.Printf("Erro ao processar promoção: %v", err)

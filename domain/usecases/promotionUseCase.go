@@ -1,6 +1,7 @@
 package usecases
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"github.com/streadway/amqp"
 	"github.com/thiagohmm/integracaocron/domain/entities"
 	"github.com/thiagohmm/integracaocron/infraestructure/rabbitmq"
+	"github.com/thiagohmm/integracaocron/pkg/tracing"
 )
 
 // PromotionUseCase handles promotion integration business logic
@@ -37,13 +39,22 @@ func NewPromotionUseCase(promotionRepo entities.PromotionRepository, rabbitmqURL
 // ProcessarPromocao processes promotion data from RabbitMQ message
 // This method can be called from the listener
 func (uc *PromotionUseCase) ProcessarPromocao(dados entities.Promotion) error {
+	ctx := context.Background()
+	ctx, span := tracing.StartSpan(ctx, "ProcessarPromocao")
+	defer span.End()
+	
 	log.Printf("Iniciando processamento de promoção com dados: %+v", dados)
 
 	// Validate promotion data
 	if dados.IPM_ID == 0 {
 		log.Printf("IPM_ID inválido (0), ignorando promoção vazia")
+		tracing.SetStatus(ctx, 2, "IPM_ID inválido")
 		return fmt.Errorf("IPM_ID inválido: não é possível processar promoção com ID 0")
 	}
+
+	// ✅ Adicionar idpromocao para pesquisa no Jaeger
+	tracing.AddPromotionID(ctx, dados.IPM_ID)
+	tracing.AddStringAttribute(ctx, "promotion.type", "individual")
 
 	// Call the main integration processing
 	return uc.ProcessIntegrationPromotions(dados)
@@ -73,11 +84,20 @@ func (uc *PromotionUseCase) ProcessarTodasPromocoesPendentes() error {
 	errorCount := 0
 
 	for _, promo := range promotions {
+		ctx := context.Background()
+		ctx, span := tracing.StartSpan(ctx, "ProcessPromotionFromPending")
+		defer span.End()
+		
+		// ✅ Adicionar idpromocao para pesquisa no Jaeger
+		tracing.AddPromotionID(ctx, promo.IPM_ID)
+		tracing.AddStringAttribute(ctx, "promotion.type", "pending")
+		
 		log.Printf("Processando promoção ID: %d", promo.IPM_ID)
 
 		err := uc.ProcessIntegrationPromotions(promo)
 		if err != nil {
 			log.Printf("Erro ao processar promoção %d: %v", promo.IPM_ID, err)
+			tracing.RecordError(ctx, err)
 			errorCount++
 		} else {
 			log.Printf("Promoção %d processada com sucesso", promo.IPM_ID)
@@ -129,9 +149,17 @@ func (uc *PromotionUseCase) ProcessIntegrationPromotions(dados entities.Promotio
 
 // processIndividualPromotion processes a single promotion with error handling
 func (uc *PromotionUseCase) processIndividualPromotion(promo entities.Promotion) {
+	ctx := context.Background()
+	ctx, span := tracing.StartSpan(ctx, "processIndividualPromotion")
+	defer span.End()
+	
+	// ✅ Adicionar idpromocao para pesquisa no Jaeger
+	tracing.AddPromotionID(ctx, promo.IPM_ID)
+	
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Recovered from panic while processing promotion %d: %v", promo.IPM_ID, r)
+			tracing.AddEvent(ctx, "panic.recovered", tracing.StringAttr("panic_value", fmt.Sprintf("%v", r)))
 			uc.handlePromotionError(promo, fmt.Errorf("panic: %v", r))
 		}
 	}()

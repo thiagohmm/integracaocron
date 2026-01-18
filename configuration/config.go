@@ -38,9 +38,11 @@ func extrairDados(descricao string) (Dados, error) {
 	var dados Dados
 
 	// Expressões regulares para extrair os valores
-	serviceNamePattern := regexp.MustCompile(`service_name=([\w.]+)`)
+	// ✅ CORREÇÃO: hostPattern agora aceita hostnames completos (letras, números, pontos, hífens, underscores)
+	// Exemplo: gbe8f3f2dbbc562_dwpdbprd_low.adb.oraclecloud.com ou 10.93.10.234
+	serviceNamePattern := regexp.MustCompile(`service_name=([\w.\-_]+)`)
 	portPattern := regexp.MustCompile(`port=(\d+)`)
-	hostPattern := regexp.MustCompile(`host=([\d.]+)`)
+	hostPattern := regexp.MustCompile(`host=([\w.\-_:]+)`) // Aceita IPs e hostnames completos
 
 	// Encontrar os valores usando as expressões regulares
 	serviceNameMatch := serviceNamePattern.FindStringSubmatch(descricao)
@@ -49,12 +51,23 @@ func extrairDados(descricao string) (Dados, error) {
 
 	// Verificar se todos os valores foram encontrados
 	if len(serviceNameMatch) < 2 || len(portMatch) < 2 || len(hostMatch) < 2 {
-		return dados, fmt.Errorf("não foi possível extrair todos os dados")
+		log.Printf("⚠️  Erro ao extrair dados da string de conexão: %s", descricao)
+		log.Printf("   Service Name encontrado: %v", len(serviceNameMatch) >= 2)
+		log.Printf("   Port encontrado: %v", len(portMatch) >= 2)
+		log.Printf("   Host encontrado: %v", len(hostMatch) >= 2)
+		log.Printf("💡 Formato esperado: host=<hostname_ou_ip> port=<porta> service_name=<service_name>")
+		log.Printf("   Exemplo: host=gbe8f3f2dbbc562_dwpdbprd_low.adb.oraclecloud.com port=1522 service_name=gbe8f3f2dbbc562_dwpdbprd_low")
+		return dados, fmt.Errorf("não foi possível extrair todos os dados da DB_CONNECTSTRING")
 	}
 
 	dados.ServiceName = serviceNameMatch[1]
 	dados.Port, _ = strconv.Atoi(portMatch[1])
 	dados.Host = hostMatch[1]
+
+	log.Printf("✅ Dados extraídos da string de conexão:")
+	log.Printf("   Host: %s", dados.Host)
+	log.Printf("   Port: %d", dados.Port)
+	log.Printf("   Service Name: %s", dados.ServiceName)
 
 	return dados, nil
 }

@@ -47,29 +47,67 @@ func (r *ProductIntegrationRepository) GetIntegrRmsProductsIn() ([]entities.Inte
 
 // RemoveProductService removes a processed product integration record
 func (r *ProductIntegrationRepository) RemoveProductService(rms entities.IntegrRmsProductIn) error {
-	// Iniciar transação
-	tx, err := r.db.Begin()
-	if err != nil {
-		return fmt.Errorf("error beginning transaction: %w", err)
+	if rms.IprID == nil {
+		return nil // Skip if no ID
 	}
-	defer tx.Rollback() // Rollback automático se não der commit
 
-	// Executar DELETE
+	// Executar DELETE direto (sem transação para melhor performance)
 	query := `DELETE FROM INTEGRRMSPRODUTOIN WHERE IPR_ID = :1`
-	result, err := tx.Exec(query, rms.IprID)
+	_, err := r.db.Exec(query, rms.IprID)
 	if err != nil {
 		return fmt.Errorf("error removing product service: %w", err)
 	}
 
-	// Verificar se deletou algo
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		log.Printf("⚠️  No rows deleted for IPR_ID: %v", rms.IprID)
+	return nil
+}
+
+// RemoveProductsServiceBatch removes multiple processed product integration records in batch
+func (r *ProductIntegrationRepository) RemoveProductsServiceBatch(iprIDs []*int) error {
+	if len(iprIDs) == 0 {
+		return nil
 	}
 
-	// Commit da transação
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("error committing delete: %w", err)
+	// Filtrar nils
+	validIDs := make([]int, 0, len(iprIDs))
+	for _, id := range iprIDs {
+		if id != nil {
+			validIDs = append(validIDs, *id)
+		}
+	}
+
+	if len(validIDs) == 0 {
+		return nil
+	}
+
+	// Construir query com IN clause (Oracle suporta até 1000 valores)
+	const batchSize = 500
+	for i := 0; i < len(validIDs); i += batchSize {
+		end := i + batchSize
+		if end > len(validIDs) {
+			end = len(validIDs)
+		}
+
+		batch := validIDs[i:end]
+		args := make([]interface{}, len(batch))
+		
+		// Construir query com placeholders Oracle
+		query := `DELETE FROM INTEGRRMSPRODUTOIN WHERE IPR_ID IN (`
+		for j := range batch {
+			if j > 0 {
+				query += ", "
+			}
+			query += fmt.Sprintf(":%d", j+1)
+			args[j] = batch[j]
+		}
+		query += ")"
+
+		_, err := r.db.Exec(query, args...)
+		if err != nil {
+			log.Printf("Error removing batch %d-%d: %v", i+1, end, err)
+			// Continuar com próximo batch mesmo se houver erro
+		} else {
+			log.Printf("Successfully deleted batch %d-%d (%d records)", i+1, end, len(batch))
+		}
 	}
 
 	return nil

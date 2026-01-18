@@ -23,10 +23,15 @@ func NewPromotionNormalizationRepository(db *sql.DB) *PromotionNormalizationRepo
 
 // GetAllRecords retrieves all records from the integration promotion table
 func (r *PromotionNormalizationRepository) GetAllRecords() ([]entities.PromotionNormalization, error) {
-	query := `SELECT ID_INTEGRACAO_PROMOCAO, ID_REVENDEDOR, ID_PROMOCAO, JSON, 
-			  DATA_ATUALIZACAO, DATA_RECEBIMENTO, ENVIANDO, TRANSACAO, DATA_INICIO_ENVIO 
-			  FROM INTEGRACAO_PROMOCAO 
-			  ORDER BY ID_INTEGRACAO_PROMOCAO ASC`
+	// ✅ CORREÇÃO: Usar nome de tabela sem underscores para consistência com outras queries
+	// O padrão no banco é INTEGRACAOPROMOCAO (sem underscores), não INTEGRACAO_PROMOCAO
+	// Baseado na estrutura de IntegrationPromotion, a tabela NÃO tem DATARECEBIMENTO
+	// Colunas disponíveis: IDINTEGRACAOPROMOCAO, IDREVENDEDOR, IDPROMOCAO, JSON, 
+	//                       DATAATUALIZACAO, ENVIANDO, TRANSACAO, DATAINICIOENVIO
+	query := `SELECT IDINTEGRACAOPROMOCAO, IDREVENDEDOR, IDPROMOCAO, JSON, 
+			  DATAATUALIZACAO, ENVIANDO, TRANSACAO, DATAINICIOENVIO 
+			  FROM INTEGRACAOPROMOCAO 
+			  ORDER BY IDINTEGRACAOPROMOCAO ASC`
 
 	rows, err := r.db.Query(query)
 	if err != nil {
@@ -39,13 +44,14 @@ func (r *PromotionNormalizationRepository) GetAllRecords() ([]entities.Promotion
 		var record entities.PromotionNormalization
 		var jsonBytes []byte
 
+		// ✅ CORREÇÃO: Removido DataRecebimento do scan pois a coluna não existe na tabela
+		// DataRecebimento será nil na struct
 		err := rows.Scan(
 			&record.IdIntegracaoPromocao,
 			&record.IdRevendedor,
 			&record.IdPromocao,
 			&jsonBytes,
 			&record.DataAtualizacao,
-			&record.DataRecebimento,
 			&record.Enviando,
 			&record.Transacao,
 			&record.DataInicioEnvio,
@@ -64,11 +70,12 @@ func (r *PromotionNormalizationRepository) GetAllRecords() ([]entities.Promotion
 
 // UpdateRecord updates a promotion record with normalized JSON
 func (r *PromotionNormalizationRepository) UpdateRecord(record entities.PromotionNormalization, updatedJSON string) error {
-	query := `UPDATE INTEGRACAO_PROMOCAO 
-			  SET JSON = :1, DATA_ATUALIZACAO = :2 
-			  WHERE ID_INTEGRACAO_PROMOCAO = :3 
-			    AND ID_REVENDEDOR = :4 
-			    AND ID_PROMOCAO = :5`
+	// ✅ CORREÇÃO: Usar nome de tabela e colunas sem underscores para consistência
+	query := `UPDATE INTEGRACAOPROMOCAO 
+			  SET JSON = :1, DATAATUALIZACAO = :2 
+			  WHERE IDINTEGRACAOPROMOCAO = :3 
+			    AND IDREVENDEDOR = :4 
+			    AND IDPROMOCAO = :5`
 
 	_, err := r.db.Exec(query,
 		updatedJSON,

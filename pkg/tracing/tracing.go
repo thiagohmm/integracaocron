@@ -266,6 +266,42 @@ func LogDebug(ctx context.Context, message string, attrs ...attribute.KeyValue) 
 	AddLogEvent(ctx, "DEBUG", message, attrs...)
 }
 
+// AddProductID adds product ID attribute for searchability in Jaeger
+// This makes it easy to search traces by product ID
+func AddProductID(ctx context.Context, idProduto int) {
+	SetAttributes(ctx, 
+		attribute.Int("idproduto", idProduto),
+		attribute.String("product.id", fmt.Sprintf("%d", idProduto)),
+	)
+}
+
+// AddProductID64 adds product ID (int64) attribute for searchability in Jaeger
+func AddProductID64(ctx context.Context, idProduto int64) {
+	SetAttributes(ctx, 
+		attribute.Int64("idproduto", idProduto),
+		attribute.String("product.id", fmt.Sprintf("%d", idProduto)),
+	)
+}
+
+// AddPromotionID adds promotion ID (IPM_ID) attribute for searchability in Jaeger
+// This makes it easy to search traces by promotion ID
+func AddPromotionID(ctx context.Context, idPromocao int) {
+	SetAttributes(ctx, 
+		attribute.Int("idpromocao", idPromocao),
+		attribute.Int("ipm_id", idPromocao),
+		attribute.String("promotion.id", fmt.Sprintf("%d", idPromocao)),
+	)
+}
+
+// AddPromotionID64 adds promotion ID (int64) attribute for searchability in Jaeger
+func AddPromotionID64(ctx context.Context, idPromocao int64) {
+	SetAttributes(ctx, 
+		attribute.Int64("idpromocao", idPromocao),
+		attribute.Int64("ipm_id", idPromocao),
+		attribute.String("promotion.id", fmt.Sprintf("%d", idPromocao)),
+	)
+}
+
 // InjectContext injects the tracing context into a carrier (for propagation)
 func InjectContext(ctx context.Context, carrier propagation.TextMapCarrier) {
 	otel.GetTextMapPropagator().Inject(ctx, carrier)
