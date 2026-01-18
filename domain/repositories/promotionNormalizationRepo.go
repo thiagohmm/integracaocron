@@ -26,7 +26,7 @@ func (r *PromotionNormalizationRepository) GetAllRecords() ([]entities.Promotion
 	// ✅ CORREÇÃO: Usar nome de tabela sem underscores para consistência com outras queries
 	// O padrão no banco é INTEGRACAOPROMOCAO (sem underscores), não INTEGRACAO_PROMOCAO
 	// Baseado na estrutura de IntegrationPromotion, a tabela NÃO tem DATARECEBIMENTO
-	// Colunas disponíveis: IDINTEGRACAOPROMOCAO, IDREVENDEDOR, IDPROMOCAO, JSON, 
+	// Colunas disponíveis: IDINTEGRACAOPROMOCAO, IDREVENDEDOR, IDPROMOCAO, JSON,
 	//                       DATAATUALIZACAO, ENVIANDO, TRANSACAO, DATAINICIOENVIO
 	query := `SELECT IDINTEGRACAOPROMOCAO, IDREVENDEDOR, IDPROMOCAO, JSON, 
 			  DATAATUALIZACAO, ENVIANDO, TRANSACAO, DATAINICIOENVIO 
