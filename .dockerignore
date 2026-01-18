@@ -20,6 +20,9 @@ main
 *.exe
 *.test
 *.out
+*.a
+*.so
+*.dylib
 
 # IDE
 .vscode/

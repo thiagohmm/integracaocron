@@ -9,28 +9,33 @@ LABEL description="IntegracaoCron - Sistema de integração com Oracle e RabbitM
 # Set working directory
 WORKDIR /app
 
-# Install build dependencies (git needed for some Go modules)
-RUN apk add --no-cache git ca-certificates tzdata
+# ✅ OTIMIZAÇÃO: Instalar dependências e limpar cache em um único layer
+RUN apk add --no-cache git ca-certificates tzdata && \
+  rm -rf /var/cache/apk/*
 
-# Copy go mod files first for better layer caching
+# ✅ OTIMIZAÇÃO: Copiar apenas go.mod e go.sum primeiro para melhor cache
 COPY go.mod go.sum ./
 
-# Download dependencies (using BuildKit cache mount for faster rebuilds)
-# This will cache the module downloads between builds
+# ✅ OTIMIZAÇÃO: Download de dependências com cache mount (BuildKit)
+# Cache persiste entre builds, acelerando rebuilds significativamente
 RUN --mount=type=cache,target=/go/pkg/mod \
+  --mount=type=cache,target=/root/.cache/go-build \
   go mod download && \
   go mod verify
 
-# Copy source code
+# ✅ OTIMIZAÇÃO: Copiar apenas arquivos necessários (usando .dockerignore)
+# Isso reduz o contexto de build e acelera o COPY
 COPY . .
 
-# Build the application with optimizations
-# -ldflags="-w -s" removes debug info and symbol tables (smaller binary)
-# -trimpath removes file system paths from the binary
+# ✅ OTIMIZAÇÃO: Build com todas as otimizações e cache
+# -ldflags="-w -s" remove debug info (reduz ~30-40% do tamanho)
+# -trimpath remove caminhos do sistema de arquivos
+# -buildvcs=false desabilita versionamento (mais rápido)
 RUN --mount=type=cache,target=/go/pkg/mod \
   --mount=type=cache,target=/root/.cache/go-build \
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-  go build -ldflags="-w -s -extldflags '-static'" \
+  go build -buildvcs=false \
+  -ldflags="-w -s -extldflags '-static'" \
   -trimpath \
   -a -installsuffix cgo \
   -o integracaocron ./cmd/app/
@@ -43,15 +48,13 @@ LABEL maintainer="integracaocron"
 LABEL description="IntegracaoCron - Sistema de integração com Oracle e RabbitMQ"
 LABEL org.opencontainers.image.source="https://github.com/thiagohmm/integracaocron"
 
-# Install only runtime dependencies (ca-certificates for HTTPS/TLS, tzdata for timezone)
+# ✅ OTIMIZAÇÃO: Combinar instalação e criação de usuário em menos layers
 RUN apk --no-cache --update add \
   ca-certificates \
-  tzdata \
-  && rm -rf /var/cache/apk/*
-
-# Create non-root user for security
-RUN addgroup -g 1000 appuser && \
-  adduser -D -u 1000 -G appuser appuser
+  tzdata && \
+  addgroup -g 1000 appuser && \
+  adduser -D -u 1000 -G appuser appuser && \
+  rm -rf /var/cache/apk/*
 
 # Set working directory
 WORKDIR /app
