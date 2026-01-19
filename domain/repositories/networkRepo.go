@@ -278,14 +278,15 @@ func (r *NetworkRepositoryImpl) processReplicatedProductsInBatchFallback(dealerI
 	}
 
 	// Query otimizada que processa todos os revendedores de uma vez
+	// Nota: INTEGRACAOPRODUTOSTAGING não possui coluna IDREDE, apenas IDREVENDEDOR
+	// Os revendedores já estão filtrados pela rede antes de chegar aqui
 	query := fmt.Sprintf(`
 		UPDATE INTEGRACAOPRODUTOSTAGING 
 		SET DATAPROCESSAMENTO = SYSTIMESTAMP,
 			STATUSPROCESSAMENTO = 1
-		WHERE IDREVENDEDOR IN (%s)
-		  AND IDREDE = :1`, dealerIDsStr)
+		WHERE IDREVENDEDOR IN (%s)`, dealerIDsStr)
 
-	result, err := r.db.ExecContext(ctx, query, idRede)
+	result, err := r.db.ExecContext(ctx, query)
 	if err != nil {
 		log.Printf("Erro ao processar produtos (fallback): %v", err)
 		return fmt.Errorf("erro ao processar produtos (fallback): %w", err)
