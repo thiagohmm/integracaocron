@@ -36,11 +36,11 @@ func (uc *ProductIntegrationUseCase) IntegrateProductService(idProduto, idDealer
 	ctx := context.Background()
 	ctx, span := tracing.StartSpan(ctx, "IntegrateProductService")
 	defer span.End()
-	
+
 	// ✅ Adicionar idproduto para pesquisa no Jaeger
 	tracing.AddProductID(ctx, idProduto)
 	tracing.AddIntAttribute(ctx, "dealer.id", idDealer)
-	
+
 	jsonPayload, err := json.Marshal(item)
 	if err != nil {
 		tracing.RecordError(ctx, err)
@@ -134,7 +134,7 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 				tracing.AddInt64Attribute(productCtx, "ipr_id", int64(*rms.IprID))
 			}
 			tracing.AddIntAttribute(productCtx, "product_index", actualIndex)
-			
+
 			// ✅ Adicionar idproduto para pesquisa no Jaeger (extrair do JSON se disponível)
 			if rms.JSON != "" {
 				var produto entities.ProductInJson
@@ -154,6 +154,16 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 			// ✅ FLUXO CORRETO: Processar igual ao TypeScript
 			func() {
 				defer productSpan.End()
+
+				// ✅ CORREÇÃO: Garantir que o ID seja adicionado para remoção mesmo em caso de panic/erro
+				// No TypeScript, removeProductService é chamado sempre (tanto sucesso quanto erro)
+				defer func() {
+					// Sempre adicionar ID para remoção (igual TypeScript)
+					if rms.IprID != nil {
+						processedIDs = append(processedIDs, rms.IprID)
+					}
+				}()
+
 				defer func() {
 					if r := recover(); r != nil {
 						iprIDStr := "nil"
@@ -170,7 +180,9 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 							tracing.StringAttr("ipr_id", iprIDStr))
 						tracing.SetStatus(productCtx, 2, fmt.Sprintf("PANIC: %v", r)) // codes.Error = 2
 
-						// Log panic error
+						// ✅ FLUXO CORRETO: Log panic error igual TypeScript catch
+						// TypeScript usa JSON.stringify(rms) no catch também
+						rmsJSON, _ := json.Marshal(rms)
 						logErro := entities.QueueMessage{
 							Tabela: "LogsIntegrRMS",
 							Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
@@ -179,8 +191,8 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 								"PRODUTOS",
 								rms.DataRecebimento,
 								time.Now(),
-								1, // Status 1 = error (igual TypeScript)
-								rms.JSON,
+								1,               // Status 1 = error (igual TypeScript)
+								string(rmsJSON), // JSON completo do objeto rms (igual TypeScript: JSON.stringify(rms))
 								fmt.Sprintf("PANIC: %v", r),
 							},
 						}
@@ -203,6 +215,9 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 				tracing.AddStringAttribute(productCtx, "processing.message", result.Message)
 
 				// ✅ FLUXO CORRETO: Log igual TypeScript
+				// TypeScript usa JSON.stringify(rms) que serializa o objeto completo
+				// No Go, serializamos o objeto rms completo para corresponder
+				rmsJSON, _ := json.Marshal(rms)
 				logErro := entities.QueueMessage{
 					Tabela: "LogsIntegrRMS",
 					Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
@@ -211,8 +226,8 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 						"PRODUTOS",
 						rms.DataRecebimento,
 						time.Now(),
-						uc.getStatusFromResult(result),
-						rms.JSON,
+						uc.getStatusFromResult(result), // 0 = sucesso, 1 = erro (igual TypeScript)
+						string(rmsJSON),                // JSON completo do objeto rms (igual TypeScript: JSON.stringify(rms))
 						uc.getMessageFromResult(result),
 					},
 				}
@@ -223,10 +238,8 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 					tracing.RecordError(productCtx, err)
 				}
 
-				// ✅ OTIMIZAÇÃO: Coletar IDs para batch delete ao invés de deletar individualmente
-				if rms.IprID != nil {
-					processedIDs = append(processedIDs, rms.IprID)
-				}
+				// ✅ NOTA: O ID já é adicionado ao processedIDs no defer acima
+				// Isso garante remoção mesmo em caso de panic/erro (igual TypeScript)
 
 				// ✅ Incrementar contadores
 				if result.Success {
@@ -286,8 +299,12 @@ func (uc *ProductIntegrationUseCase) ImportProductIntegration() (bool, error) {
 	log.Printf("   ❌ Failed:          %d (%.1f%%)", failureCount, float64(failureCount)/float64(totalProducts)*100)
 	log.Printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
-	// Return true if at least one product succeeded
-	return successCount > 0, nil
+	// ✅ CORREÇÃO: Retornar true se TODOS foram sucesso (igual TypeScript: !isFalse)
+	// TypeScript: const isFalse: boolean = success.some((valor) => valor === false)
+	// TypeScript: return !isFalse  // true se nenhum foi false
+	// Go equivalente: true se nenhum falhou (failureCount == 0)
+	allSucceeded := failureCount == 0
+	return allSucceeded, nil
 }
 
 // processProductIntegration processes a single product integration
@@ -300,7 +317,7 @@ func (uc *ProductIntegrationUseCase) processProductIntegration(rms entities.Inte
 	if rms.IprID != nil {
 		tracing.AddInt64Attribute(ctx, "ipr_id", int64(*rms.IprID))
 	}
-	
+
 	// ✅ Adicionar idproduto para pesquisa no Jaeger
 	if rms.JSON != "" {
 		var produto entities.ProductInJson
@@ -345,6 +362,13 @@ func (uc *ProductIntegrationUseCase) processProductIntegration(rms entities.Inte
 		log.Printf("❌ ERROR: Failed to parse JSON for IPR_ID %v: %v", rms.IprID, err)
 		tracing.RecordError(ctx, err)
 		tracing.AddEvent(ctx, "json.parse.failed")
+
+		// ✅ Log no Jaeger: Erro ao fazer parse do JSON
+		tracing.LogError(ctx, "Failed to parse product JSON",
+			tracing.StringAttr("ipr_id", fmt.Sprintf("%v", rms.IprID)),
+			tracing.StringAttr("json.original", rms.JSON),
+			tracing.StringAttr("error", err.Error()))
+
 		return &entities.LogValidate{
 			Success: false,
 			Message: fmt.Sprintf("Error parsing JSON: %v", err),
@@ -354,6 +378,27 @@ func (uc *ProductIntegrationUseCase) processProductIntegration(rms entities.Inte
 	log.Printf("✅ JSON parsed successfully for IPR_ID %v, calling Oracle procedure pkg_integra_produto.prc_integra_hermes", rms.IprID)
 	tracing.AddEvent(ctx, "json.parsed.success")
 
+	// ✅ Log no Jaeger: Produto antes de chamar dopkg_produto
+	// Extrair informações do produto para o log
+	var codRMS, descProduto string
+	if len(produto.ProdutosSelect) > 0 {
+		codRMS = produto.ProdutosSelect[0].CodRMS.String()
+		if codRMS == "" {
+			codRMS = produto.ProdutosSelect[0].Cod.String()
+		}
+		descProduto = produto.ProdutosSelect[0].Desc
+	}
+
+	// ✅ Log estruturado no Jaeger com todas as informações do produto
+	tracing.LogInfo(ctx, "Calling dopkg_produto (Oracle procedure)",
+		tracing.StringAttr("ipr_id", fmt.Sprintf("%v", rms.IprID)),
+		tracing.StringAttr("json.original", rms.JSON),
+		tracing.StringAttr("data_recebimento", rms.DataRecebimento.Format(time.RFC3339)),
+		tracing.StringAttr("cod_rms", codRMS),
+		tracing.StringAttr("desc_produto", descProduto),
+		tracing.StringAttr("produtos_count", fmt.Sprintf("%d", len(produto.ProdutosSelect))),
+		tracing.StringAttr("procedure", "pkg_integra_produto.prc_integra_hermes"))
+
 	// Call Oracle stored procedure to handle the integration
 	if rms.IprID != nil {
 		result, err := uc.repo.DoPackageProductIntegration(*rms.IprID)
@@ -361,12 +406,41 @@ func (uc *ProductIntegrationUseCase) processProductIntegration(rms entities.Inte
 			log.Printf("❌ ERROR: Oracle procedure failed for IPR_ID %v: %v", rms.IprID, err)
 			tracing.RecordError(ctx, err)
 			tracing.SetStatus(ctx, 2, fmt.Sprintf("Oracle error: %v", err))
+
+			// ✅ Log no Jaeger: Erro na procedure Oracle
+			tracing.LogError(ctx, "Oracle procedure dopkg_produto failed",
+				tracing.StringAttr("ipr_id", fmt.Sprintf("%d", *rms.IprID)),
+				tracing.StringAttr("json.original", rms.JSON),
+				tracing.StringAttr("cod_rms", codRMS),
+				tracing.StringAttr("desc_produto", descProduto),
+				tracing.StringAttr("procedure", "pkg_integra_produto.prc_integra_hermes"),
+				tracing.StringAttr("error", err.Error()))
+
 			return &entities.LogValidate{
 				Success: false,
 				Message: fmt.Sprintf("Error executing Oracle procedure: %v", err),
 			}
 		}
 		log.Printf("Oracle procedure completed for IPR_ID %v - Success: %v, Message: %s", rms.IprID, result.Success, result.Message)
+
+		// ✅ Log no Jaeger: Resultado da procedure Oracle
+		if result.Success {
+			tracing.LogInfo(ctx, "Oracle procedure dopkg_produto completed successfully",
+				tracing.StringAttr("ipr_id", fmt.Sprintf("%d", *rms.IprID)),
+				tracing.StringAttr("json.original", rms.JSON),
+				tracing.StringAttr("cod_rms", codRMS),
+				tracing.StringAttr("desc_produto", descProduto),
+				tracing.StringAttr("procedure", "pkg_integra_produto.prc_integra_hermes"),
+				tracing.StringAttr("result.message", result.Message))
+		} else {
+			tracing.LogError(ctx, "Oracle procedure dopkg_produto completed with error",
+				tracing.StringAttr("ipr_id", fmt.Sprintf("%d", *rms.IprID)),
+				tracing.StringAttr("json.original", rms.JSON),
+				tracing.StringAttr("cod_rms", codRMS),
+				tracing.StringAttr("desc_produto", descProduto),
+				tracing.StringAttr("procedure", "pkg_integra_produto.prc_integra_hermes"),
+				tracing.StringAttr("result.message", result.Message))
+		}
 
 		// 🔍 Tracing: Registrar resultado
 		tracing.AddBoolAttribute(ctx, "oracle.success", result.Success)
@@ -393,9 +467,23 @@ func (uc *ProductIntegrationUseCase) processProductIntegration(rms entities.Inte
 // This function calls the Oracle procedure pkg_integra_produto.prc_integra_hermes
 // just like the TypeScript version does with dopkg_produto
 func (uc *ProductIntegrationUseCase) processProductFromStaging(stagingRecord entities.ProductIntegrationStaging) *entities.LogValidate {
+	ctx := context.Background()
+	ctx, span := tracing.StartSpan(ctx, "ProcessProductFromStaging")
+	defer span.End()
+
+	// ✅ Tracing: Registrar IDs
+	tracing.AddInt64Attribute(ctx, "staging_id", int64(stagingRecord.IdIntegrationProdutoStaging))
+	tracing.AddInt64Attribute(ctx, "product_id", int64(stagingRecord.IdProduto))
+	tracing.AddInt64Attribute(ctx, "dealer_id", int64(stagingRecord.IdRevendedor))
+	tracing.AddProductID(ctx, int(stagingRecord.IdProduto))
+
 	defer func() {
 		if r := recover(); r != nil {
 			log.Printf("Panic recovered in processProductFromStaging: %v", r)
+			tracing.LogError(ctx, "Panic recovered in processProductFromStaging",
+				tracing.StringAttr("panic_value", fmt.Sprintf("%v", r)),
+				tracing.IntAttr("staging_id", stagingRecord.IdIntegrationProdutoStaging),
+				tracing.IntAttr("product_id", stagingRecord.IdProduto))
 		}
 	}()
 
@@ -406,15 +494,41 @@ func (uc *ProductIntegrationUseCase) processProductFromStaging(stagingRecord ent
 
 	// Parse JSON to validate it (optional, but good for logging)
 	var productSelect entities.ProductSelectIntegration
+	var codRMS, descProduto string
 	if err := json.Unmarshal([]byte(stagingRecord.Json), &productSelect); err != nil {
 		log.Printf("ERROR: Failed to parse JSON from staging ID %d: %v", stagingRecord.IdIntegrationProdutoStaging, err)
+
+		// ✅ Log no Jaeger: Erro ao fazer parse do JSON
+		tracing.LogError(ctx, "Failed to parse JSON from staging",
+			tracing.IntAttr("staging_id", stagingRecord.IdIntegrationProdutoStaging),
+			tracing.IntAttr("product_id", stagingRecord.IdProduto),
+			tracing.StringAttr("json.original", stagingRecord.Json),
+			tracing.StringAttr("error", err.Error()))
+
 		return &entities.LogValidate{
 			Success: false,
 			Message: fmt.Sprintf("Error parsing JSON from staging: %v", err),
 		}
+	} else {
+		// Extrair informações do produto
+		codRMS = productSelect.CodRMS.String()
+		if codRMS == "" {
+			codRMS = productSelect.Cod.String()
+		}
+		descProduto = productSelect.Desc
 	}
 
 	log.Printf("JSON parsed successfully from staging, calling Oracle procedure pkg_integra_produto.prc_integra_hermes for Product ID: %d", stagingRecord.IdProduto)
+
+	// ✅ Log no Jaeger: Produto antes de chamar dopkg_produto (staging)
+	tracing.LogInfo(ctx, "Calling dopkg_produto (Oracle procedure) from staging",
+		tracing.IntAttr("staging_id", stagingRecord.IdIntegrationProdutoStaging),
+		tracing.IntAttr("product_id", stagingRecord.IdProduto),
+		tracing.IntAttr("dealer_id", stagingRecord.IdRevendedor),
+		tracing.StringAttr("json.original", stagingRecord.Json),
+		tracing.StringAttr("cod_rms", codRMS),
+		tracing.StringAttr("desc_produto", descProduto),
+		tracing.StringAttr("procedure", "pkg_integra_produto.prc_integra_hermes"))
 
 	// Call Oracle procedure to process the product (just like TypeScript dopkg_produto)
 	// The procedure receives the Product ID and processes the integration
@@ -422,6 +536,18 @@ func (uc *ProductIntegrationUseCase) processProductFromStaging(stagingRecord ent
 	if err != nil {
 		log.Printf("ERROR: Oracle procedure failed for Product ID %d (Staging ID: %d): %v",
 			stagingRecord.IdProduto, stagingRecord.IdIntegrationProdutoStaging, err)
+
+		// ✅ Log no Jaeger: Erro na procedure Oracle (staging)
+		tracing.LogError(ctx, "Oracle procedure dopkg_produto failed (from staging)",
+			tracing.IntAttr("staging_id", stagingRecord.IdIntegrationProdutoStaging),
+			tracing.IntAttr("product_id", stagingRecord.IdProduto),
+			tracing.IntAttr("dealer_id", stagingRecord.IdRevendedor),
+			tracing.StringAttr("json.original", stagingRecord.Json),
+			tracing.StringAttr("cod_rms", codRMS),
+			tracing.StringAttr("desc_produto", descProduto),
+			tracing.StringAttr("procedure", "pkg_integra_produto.prc_integra_hermes"),
+			tracing.StringAttr("error", err.Error()))
+
 		return &entities.LogValidate{
 			Success: false,
 			Message: fmt.Sprintf("Error executing Oracle procedure: %v", err),
@@ -430,6 +556,29 @@ func (uc *ProductIntegrationUseCase) processProductFromStaging(stagingRecord ent
 
 	log.Printf("Oracle procedure completed for Product ID %d - Success: %v, Message: %s",
 		stagingRecord.IdProduto, result.Success, result.Message)
+
+	// ✅ Log no Jaeger: Resultado da procedure Oracle (staging)
+	if result.Success {
+		tracing.LogInfo(ctx, "Oracle procedure dopkg_produto completed successfully (from staging)",
+			tracing.IntAttr("staging_id", stagingRecord.IdIntegrationProdutoStaging),
+			tracing.IntAttr("product_id", stagingRecord.IdProduto),
+			tracing.IntAttr("dealer_id", stagingRecord.IdRevendedor),
+			tracing.StringAttr("json.original", stagingRecord.Json),
+			tracing.StringAttr("cod_rms", codRMS),
+			tracing.StringAttr("desc_produto", descProduto),
+			tracing.StringAttr("procedure", "pkg_integra_produto.prc_integra_hermes"),
+			tracing.StringAttr("result.message", result.Message))
+	} else {
+		tracing.LogError(ctx, "Oracle procedure dopkg_produto completed with error (from staging)",
+			tracing.IntAttr("staging_id", stagingRecord.IdIntegrationProdutoStaging),
+			tracing.IntAttr("product_id", stagingRecord.IdProduto),
+			tracing.IntAttr("dealer_id", stagingRecord.IdRevendedor),
+			tracing.StringAttr("json.original", stagingRecord.Json),
+			tracing.StringAttr("cod_rms", codRMS),
+			tracing.StringAttr("desc_produto", descProduto),
+			tracing.StringAttr("procedure", "pkg_integra_produto.prc_integra_hermes"),
+			tracing.StringAttr("result.message", result.Message))
+	}
 
 	// Always remove from staging after processing (success or failure)
 	// This matches the TypeScript behavior: await removeProductService(rms, integrRmsProductInQuery)

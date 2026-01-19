@@ -23,8 +23,9 @@ func NewProductIntegrationRepository(db *sql.DB) *ProductIntegrationRepository {
 }
 
 // GetIntegrRmsProductsIn retrieves all pending RMS product integrations
+// ✅ CORREÇÃO: Ordenar por IPR_ID ASC para corresponder ao TypeScript
 func (r *ProductIntegrationRepository) GetIntegrRmsProductsIn() ([]entities.IntegrRmsProductIn, error) {
-	query := `SELECT IPR_ID, JSON, DATARECEBIMENTO FROM INTEGRRMSPRODUTOIN ORDER BY DATARECEBIMENTO ASC`
+	query := `SELECT IPR_ID, JSON, DATARECEBIMENTO FROM INTEGRRMSPRODUTOIN ORDER BY IPR_ID ASC`
 
 	rows, err := r.db.Query(query)
 	if err != nil {
