@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/thiagohmm/integracaocron/domain/entities"
@@ -24,7 +25,9 @@ func NewIntegrationRepository(db *sql.DB) entities.IntegrationRepository {
 
 // Transaction removal methods
 func (r *IntegrationRepositoryImpl) RemoveIntegrationCombo(dataCorte time.Time, expurgo ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Timeout aumentado para 600 segundos (10 minutos) pois a stored procedure
+	// pode processar grandes volumes de dados e demorar mais tempo
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
 
 	// Set default value for expurgo if not provided
@@ -37,6 +40,13 @@ func (r *IntegrationRepositoryImpl) RemoveIntegrationCombo(dataCorte time.Time, 
 
 	_, err := r.db.ExecContext(ctx, query, dataCorte, fazExpurgo)
 	if err != nil {
+		// Verificar se é erro de timeout/cancelamento
+		if strings.Contains(err.Error(), "ORA-01013") || 
+		   strings.Contains(err.Error(), "user requested cancel") ||
+		   strings.Contains(err.Error(), "context deadline exceeded") {
+			log.Printf("Erro de timeout ao remover integração combo (stored procedure demorou mais de 10 minutos): %v", err)
+			return fmt.Errorf("timeout ao remover integração combo: a operação demorou mais de 10 minutos. Considere verificar o volume de dados ou otimizar a stored procedure: %w", err)
+		}
 		log.Printf("Erro ao executar sp_limparintegracaocombocorte: %v", err)
 		return fmt.Errorf("erro ao remover integração combo: %w", err)
 	}
@@ -46,7 +56,9 @@ func (r *IntegrationRepositoryImpl) RemoveIntegrationCombo(dataCorte time.Time, 
 }
 
 func (r *IntegrationRepositoryImpl) ClearIntegrationPackagingByCutOffDate(dataCorte time.Time, expurgo ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Timeout aumentado para 600 segundos (10 minutos) pois a stored procedure
+	// pode processar grandes volumes de dados e demorar mais tempo
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
 
 	// Set default value
@@ -59,6 +71,13 @@ func (r *IntegrationRepositoryImpl) ClearIntegrationPackagingByCutOffDate(dataCo
 
 	_, err := r.db.ExecContext(ctx, query, dataCorte, fazExpurgo)
 	if err != nil {
+		// Verificar se é erro de timeout/cancelamento
+		if strings.Contains(err.Error(), "ORA-01013") || 
+		   strings.Contains(err.Error(), "user requested cancel") ||
+		   strings.Contains(err.Error(), "context deadline exceeded") {
+			log.Printf("Erro de timeout ao limpar integração embalagem (stored procedure demorou mais de 10 minutos): %v", err)
+			return fmt.Errorf("timeout ao limpar integração embalagem: a operação demorou mais de 10 minutos. Considere verificar o volume de dados ou otimizar a stored procedure: %w", err)
+		}
 		log.Printf("Erro ao limpar integração embalagem: %v", err)
 		return fmt.Errorf("erro ao limpar integração embalagem: %w", err)
 	}
@@ -67,7 +86,9 @@ func (r *IntegrationRepositoryImpl) ClearIntegrationPackagingByCutOffDate(dataCo
 }
 
 func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoEstruturaMercadologica(dataCorte time.Time, expurgo ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Timeout aumentado para 600 segundos (10 minutos) pois a stored procedure
+	// pode processar grandes volumes de dados e demorar mais tempo
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
 
 	// Set default value
@@ -80,6 +101,13 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoEstruturaMercadolo
 
 	_, err := r.db.ExecContext(ctx, query, dataCorte, fazExpurgo)
 	if err != nil {
+		// Verificar se é erro de timeout/cancelamento
+		if strings.Contains(err.Error(), "ORA-01013") || 
+		   strings.Contains(err.Error(), "user requested cancel") ||
+		   strings.Contains(err.Error(), "context deadline exceeded") {
+			log.Printf("Erro de timeout ao remover transação estrutura mercadológica (stored procedure demorou mais de 10 minutos): %v", err)
+			return fmt.Errorf("timeout ao remover transação estrutura mercadológica: a operação demorou mais de 10 minutos. Considere verificar o volume de dados ou otimizar a stored procedure: %w", err)
+		}
 		log.Printf("Erro ao remover transação estrutura mercadológica: %v", err)
 		return fmt.Errorf("erro ao remover transação estrutura mercadológica: %w", err)
 	}
@@ -88,7 +116,9 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoEstruturaMercadolo
 }
 
 func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoProduto(dataCorte time.Time, expurgo ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Timeout aumentado para 600 segundos (10 minutos) pois a stored procedure
+	// pode processar grandes volumes de dados e demorar mais tempo
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
 
 	// Set default value
@@ -101,6 +131,13 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoProduto(dataCorte 
 
 	_, err := r.db.ExecContext(ctx, query, dataCorte, fazExpurgo)
 	if err != nil {
+		// Verificar se é erro de timeout/cancelamento
+		if strings.Contains(err.Error(), "ORA-01013") || 
+		   strings.Contains(err.Error(), "user requested cancel") ||
+		   strings.Contains(err.Error(), "context deadline exceeded") {
+			log.Printf("Erro de timeout ao remover transação produto (stored procedure demorou mais de 10 minutos): %v", err)
+			return fmt.Errorf("timeout ao remover transação produto: a operação demorou mais de 10 minutos. Considere verificar o volume de dados ou otimizar a stored procedure: %w", err)
+		}
 		log.Printf("Erro ao remover transação produto: %v", err)
 		return fmt.Errorf("erro ao remover transação produto: %w", err)
 	}
@@ -109,7 +146,9 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoProduto(dataCorte 
 }
 
 func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoPromocao(dataCorte time.Time, expurgo ...string) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	// Timeout aumentado para 600 segundos (10 minutos) pois a stored procedure
+	// pode processar grandes volumes de dados e demorar mais tempo
+	ctx, cancel := context.WithTimeout(context.Background(), 600*time.Second)
 	defer cancel()
 
 	// Set default value
@@ -122,6 +161,13 @@ func (r *IntegrationRepositoryImpl) RemoverTransacaoIntegracaoPromocao(dataCorte
 
 	_, err := r.db.ExecContext(ctx, query, dataCorte, fazExpurgo)
 	if err != nil {
+		// Verificar se é erro de timeout/cancelamento
+		if strings.Contains(err.Error(), "ORA-01013") || 
+		   strings.Contains(err.Error(), "user requested cancel") ||
+		   strings.Contains(err.Error(), "context deadline exceeded") {
+			log.Printf("Erro de timeout ao remover transação promoção (stored procedure demorou mais de 10 minutos): %v", err)
+			return fmt.Errorf("timeout ao remover transação promoção: a operação demorou mais de 10 minutos. Considere verificar o volume de dados ou otimizar a stored procedure: %w", err)
+		}
 		log.Printf("Erro ao remover transação promoção: %v", err)
 		return fmt.Errorf("erro ao remover transação promoção: %w", err)
 	}
