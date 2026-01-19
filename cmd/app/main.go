@@ -55,6 +55,15 @@ func main() {
 
 	logger.Info(ctx, "Conexão com banco de dados estabelecida")
 
+	// Get RabbitMQ configuration
+	rabbitmqURL := getRabbitMQURL(cfg)
+	if rabbitmqURL == "" {
+		logger.Error(ctx, "URL do RabbitMQ não configurada")
+		log.Fatal("URL do RabbitMQ não configurada")
+	}
+
+	logger.Info(ctx, "Configuração RabbitMQ carregada: %s", maskRabbitMQURL(rabbitmqURL))
+
 	// Initialize repositories
 	promotionRepo := repositories.NewPromotionRepository(db)
 	parameterRepo := repositories.NewParameterRepository(db)
@@ -67,15 +76,9 @@ func main() {
 	unitOfMeasurementRepo := repositories.NewUnitOfMeasurementRepository(db)
 	packagingIntegrationStagingRepo := repositories.NewPackagingIntegrationStagingRepository(db)
 
-
-	// Get RabbitMQ configuration
-	rabbitmqURL := getRabbitMQURL(cfg)
-	if rabbitmqURL == "" {
-		logger.Error(ctx, "URL do RabbitMQ não configurada")
-		log.Fatal("URL do RabbitMQ não configurada")
-	}
-
-	logger.Info(ctx, "Configuração RabbitMQ carregada: %s", maskRabbitMQURL(rabbitmqURL))
+	// ✅ Configure RabbitMQ URL for repositories that need it
+	productIntegrationRepo.SetRabbitMQURL(rabbitmqURL)
+	promotionNormalizationRepo.SetRabbitMQURL(rabbitmqURL)
 
 	// Initialize use cases
 	packagingIntegrationUC := usecases.NewPackagingIntegrationUseCase(productRepo, productPackagingRepo, unitOfMeasurementRepo, packagingIntegrationStagingRepo)

@@ -105,25 +105,10 @@ func (r *NetworkRepositoryImpl) ListByAllByIdDealerNew(idDealer int) ([]entities
 	return dealers, nil
 }
 
-// ReplicateProductNetwork replicates products for a network
+// ReplicateProductNetwork replicates products for a network using stored procedure
 func (r *NetworkRepositoryImpl) ReplicateProductNetwork(idRede int) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	// This should be implemented based on your business logic
-	// For now, it's a placeholder that logs the operation
-	log.Printf("ReplicateProductNetwork called for idRede: %d", idRede)
-
-	// Example placeholder query - replace with actual implementation
-	query := `UPDATE PRODUTOS_REDE SET STATUS_REPLICACAO = 'ATIVO' WHERE IDREDE = :1`
-
-	_, err := r.db.ExecContext(ctx, query, idRede)
-	if err != nil {
-		log.Printf("Erro ao replicar produtos da rede %d: %v", idRede, err)
-		return fmt.Errorf("erro ao replicar produtos da rede: %w", err)
-	}
-
-	return nil
+	// ✅ CORREÇÃO: Usar stored procedure ao invés de placeholder
+	return r.ReplicateProductNetworkSP(idRede)
 }
 
 // GetNetworkReplicadosByDealer gets replicated data by dealer (limited to first row)

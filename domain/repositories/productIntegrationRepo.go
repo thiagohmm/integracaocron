@@ -7,12 +7,15 @@ import (
 	"log"
 	"strings"
 
+	"github.com/streadway/amqp"
 	"github.com/thiagohmm/integracaocron/domain/entities"
+	"github.com/thiagohmm/integracaocron/infraestructure/rabbitmq"
 )
 
 // ProductIntegrationRepository handles product integration database operations
 type ProductIntegrationRepository struct {
-	db *sql.DB
+	db          *sql.DB
+	rabbitmqURL string
 }
 
 // NewProductIntegrationRepository creates a new instance of ProductIntegrationRepository
@@ -20,6 +23,11 @@ func NewProductIntegrationRepository(db *sql.DB) *ProductIntegrationRepository {
 	return &ProductIntegrationRepository{
 		db: db,
 	}
+}
+
+// SetRabbitMQURL sets the RabbitMQ URL for sending messages
+func (r *ProductIntegrationRepository) SetRabbitMQURL(url string) {
+	r.rabbitmqURL = url
 }
 
 // GetIntegrRmsProductsIn retrieves all pending RMS product integrations
@@ -435,12 +443,68 @@ func (r *ProductIntegrationRepository) SaveLogIntegration(log entities.LogIntegr
 	return nil
 }
 
-// SendToQueue sends a message to queue (placeholder implementation)
+// SendToQueue sends a message to RabbitMQ queue
 func (r *ProductIntegrationRepository) SendToQueue(message entities.QueueMessage) error {
-	// This would integrate with RabbitMQ or other message queue
-	// For now, we'll just log the message
-	messageJSON, _ := json.Marshal(message)
-	log.Printf("Sending to queue: %s", string(messageJSON))
+	if r.rabbitmqURL == "" {
+		// Fallback: log if RabbitMQ URL is not configured
+		messageJSON, _ := json.Marshal(message)
+		log.Printf("RabbitMQ URL not configured, logging message: %s", string(messageJSON))
+		return nil
+	}
+
+	// Get RabbitMQ connection
+	conn, err := rabbitmq.GetRabbitMQConnection(r.rabbitmqURL)
+	if err != nil {
+		log.Printf("Erro ao conectar ao RabbitMQ: %v", err)
+		return err
+	}
+
+	// Create channel
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Printf("Erro ao criar canal RabbitMQ: %v", err)
+		return err
+	}
+	defer ch.Close()
+
+	// Convert message to JSON
+	body, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("Erro ao converter mensagem para JSON: %v", err)
+		return err
+	}
+
+	// Declare queue (ensure it exists)
+	queueName := "log"
+	_, err = ch.QueueDeclare(
+		queueName, // name
+		true,      // durable
+		false,     // delete when unused
+		false,     // exclusive
+		false,     // no-wait
+		nil,       // arguments
+	)
+	if err != nil {
+		log.Printf("Erro ao declarar fila: %v", err)
+		return err
+	}
+
+	// Publish message
+	err = ch.Publish(
+		"",        // exchange
+		queueName, // routing key
+		false,     // mandatory
+		false,     // immediate
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        body,
+		})
+
+	if err != nil {
+		log.Printf("Erro ao enviar mensagem para fila: %v", err)
+		return err
+	}
+
 	return nil
 }
 
