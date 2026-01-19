@@ -50,11 +50,12 @@ func (l *Listener) ListenToQueue(rabbitmqurl string) error {
 		return fmt.Errorf("rabbitmq URL cannot be empty")
 	}
 
+	// ✅ CORREÇÃO: Processar uma mensagem de cada vez
 	if l.Workers <= 0 {
-		l.Workers = 20 // default to 20 workers if not set
+		l.Workers = 1 // default to 1 worker para processar uma mensagem de cada vez
 	}
 
-	log.Printf("Iniciando listener RabbitMQ com %d workers - Container sempre ativo", l.Workers)
+	log.Printf("Iniciando listener RabbitMQ com %d workers - Processando uma mensagem de cada vez", l.Workers)
 
 	// Loop infinito para manter a aplicação sempre ativa
 	for {
@@ -77,11 +78,12 @@ func (l *Listener) ListenToQueue(rabbitmqurl string) error {
 			continue
 		}
 
-		// Configurar prefetch count para controlar quantas mensagens cada worker recebe
+		// ✅ CORREÇÃO: Configurar prefetch count para 1 (uma mensagem por vez)
+		// Isso garante que cada worker processe apenas uma mensagem de cada vez
 		err = ch.Qos(
-			l.Workers, // prefetch count
-			0,         // prefetch size
-			false,     // global
+			1,     // prefetch count = 1 (uma mensagem por vez)
+			0,     // prefetch size
+			false, // global
 		)
 		if err != nil {
 			log.Printf("Erro configurando QoS: %v. Tentando reconectar...", err)
