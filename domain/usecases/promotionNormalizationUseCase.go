@@ -265,7 +265,12 @@ func (uc *PromotionNormalizationUseCase) processRecord(
 	} else {
 		log.Println("No changes detected - record not updated")
 		tracing.AddEvent(recordCtx, "record.no_changes")
-		tracing.SetStatus(recordCtx, 1, "No changes needed")
+		// ✅ CORREÇÃO: "No changes needed" é INFO, não ERROR
+		// Usar LogInfo para registrar como informação, não erro
+		tracing.LogInfo(recordCtx, "No changes needed - record already normalized",
+			tracing.IntAttr("promotion.id", getIntValue(record.IdPromocao)),
+			tracing.StringAttr("promotion.cod_mix", jsonData.CodMix))
+		tracing.SetStatus(recordCtx, 1, "No changes needed") // codes.Ok = 1
 	}
 
 	return nil
