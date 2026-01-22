@@ -11,6 +11,8 @@ Sistema de integração desenvolvido em Go para processamento de dados via Rabbi
 - **Graceful shutdown**
 - **Logging detalhado**
 - **Containerização Docker**
+- **Tracing distribuído** com Jaeger
+- **UUID para rastreamento** de transações
 
 ## 📋 Pré-requisitos
 
@@ -48,6 +50,11 @@ ENV_REDIS_EXPIRE=3600
 
 # Application Configuration
 WORKERS=20
+
+# Jaeger Tracing
+JAEGER_ENDPOINT=http://localhost:14268/api/traces
+TRACING_ENABLED=true
+TRACING_SAMPLE_RATE=1.0
 ```
 
 ### 3. Instale as dependências
@@ -172,6 +179,23 @@ docker-compose -f docker-compose.jaeger.yml up -d
 - Visualizar traces da aplicação `integracaocron`
 - Analisar performance e logs integrados
 
+### UUID para Rastreamento
+
+Cada transação de mover produto e promoção gera um UUID único que é:
+- Adicionado ao Jaeger como atributo (`transaction_uuid`, `uuid`)
+- Enviado para a fila "log" no campo `TRANSACAO`
+- Exibido nos logs do console
+- Propagado através do contexto usando OpenTelemetry Baggage
+
+**Formato do log:**
+```
+[INFO][trace:5625da8d][span:0cab5369][uuid:550e8400-e29b-41d4-a716-446655440000] Iniciando processamento de produto
+```
+
+**Buscar no Jaeger:**
+- Tags: `uuid=<seu-uuid>` ou `transaction_uuid=<seu-uuid>`
+- Operation: `MoverProduto` ou `MoverPromocao`
+
 ### Logs da aplicação
 ```bash
 # Docker Compose
@@ -185,6 +209,126 @@ tail -f logs/integracaocron.log
 - URL: http://localhost:15672
 - Usuário: admin
 - Senha: admin123
+
+## 📡 URLs e Endpoints HTTP
+
+### GET /health
+
+**Porta:** Configurável via variável de ambiente `HTTP_PORT` (padrão: 8080)
+
+**Finalidade:** Endpoint de verificação de saúde (health check) do serviço
+
+**Resposta de Sucesso:**
+```json
+{
+  "status": "ok"
+}
+```
+
+**Código HTTP:** 200 OK
+
+### POST /integration
+
+**Porta:** Configurável via variável de ambiente `HTTP_PORT` (padrão: 8080)
+
+**Finalidade:** Endpoint principal para processar diferentes tipos de integrações
+
+**Formato da Requisição:**
+```json
+{
+  "tipoIntegracao": "tipo_da_integracao",
+  "dados": {
+    // dados específicos da integração (opcional)
+  }
+}
+```
+
+#### Tipos de Integração Suportados:
+
+##### Promoção (`promocao` ou `Promocao`)
+```json
+{
+  "tipoIntegracao": "promocao",
+  "dados": {
+    "ipm_id": 12345
+  }
+}
+```
+
+##### Produto (`produto` ou `Produto`)
+```json
+{
+  "tipoIntegracao": "produto"
+}
+```
+
+##### Normalização de Promoção (`promocao_normalizacao` ou `PromocaoNormalizacao`)
+```json
+{
+  "tipoIntegracao": "promocao_normalizacao"
+}
+```
+
+##### Product Network Main (`mover`, `productNetworkMain` ou `product_network_main`)
+```json
+{
+  "tipoIntegracao": "mover"
+}
+```
+
+**Respostas do Endpoint /integration**
+
+**Sucesso (200 OK):**
+```json
+{
+  "success": true,
+  "message": "Integração processada com sucesso"
+}
+```
+
+**Erro de Validação (400 Bad Request):**
+```json
+{
+  "success": false,
+  "error": "Invalid request format: [detalhes do erro]"
+}
+```
+
+**Erro de Processamento (500 Internal Server Error):**
+```json
+{
+  "success": false,
+  "error": "[mensagem de erro específica]"
+}
+```
+
+### Exemplos de Uso com cURL
+
+#### Health Check
+```bash
+curl -X GET http://localhost:8080/health
+```
+
+#### Processar Promoção Específica
+```bash
+curl -X POST http://localhost:8080/integration \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tipoIntegracao": "promocao",
+    "dados": {
+      "ipm_id": 12345
+    }
+  }'
+```
+
+#### Processar Integração de Produtos
+```bash
+curl -X POST http://localhost:8080/integration \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tipoIntegracao": "produto"
+  }'
+```
 
 ## ⚙️ Configurações Avançadas
 
@@ -242,10 +386,172 @@ make dev  # fmt + vet + test + build
 ### Formato do log de saída
 ```json
 {
-  "tabela": "LogIntegrRMS",
+  "tabela": "LogsIntegrRMS",
   "fields": ["TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"],
   "values": ["IN", "PROMOCAO", "2025-10-06 12:00:00", "2025-10-06 12:05:00", 0, "{...}", "Processamento realizado com sucesso."]
 }
+```
+
+## 🔍 Tracing Jaeger - IDs Registrados
+
+### ProductIntegrationUseCase - ImportProductIntegration()
+
+#### Span Principal: `ImportProductIntegration`
+
+**Atributos Globais:**
+- `total_products` - Total de produtos a processar
+- `final.success_count` - Total de sucessos
+- `final.failure_count` - Total de falhas
+- `final.success_rate` - Taxa de sucesso (%)
+
+#### Span de Batch: `ProcessProductBatch`
+
+**Atributos por Batch:**
+- `batch.start` - Índice inicial do batch
+- `batch.end` - Índice final do batch
+- `batch.size` - Tamanho do batch
+- `batch.success_count` - Sucessos acumulados
+- `batch.failure_count` - Falhas acumuladas
+
+#### Span de Produto: `ProcessSingleProduct`
+
+**Atributos por Produto:**
+- `staging_id` - ID da tabela INTEGRACAOPRODUTOSTAGING
+- `product_id` - ID do produto (IDPRODUTO)
+- `dealer_id` - ID do revendedor (IDREVENDEDOR)
+- `product_index` - Índice do produto na lista
+- `processing.success` - true/false - sucesso do processamento
+- `processing.message` - Mensagem de resultado
+
+### IntegrationJobUseCase - ProductNetworkMain()
+
+#### Span Principal: `ProductNetworkMain`
+
+**Atributos Globais:**
+- `data_corte` - Data de corte do job (RFC3339)
+
+**Eventos de Jobs:**
+- `integration_job.completed` / `integration_job.failed`
+- `replicate_network.completed` / `replicate_network.failed`
+- `move_data.completed` / `move_data.failed`
+- `update_expiration.completed` / `update_expiration.failed`
+
+### IntegrationJobUseCase - ReplicateNetworkProductsJob()
+
+#### Span Principal: `ReplicateNetworkProductsJob`
+
+**Atributos Globais:**
+- `total_networks` - Total de redes a processar
+
+#### Span de Rede: `ProcessNetwork`
+
+**Atributos por Rede:**
+- `network_id` - ID da rede (IDREDE)
+- `dealer_id` - ID do revendedor principal
+- `network_index` - Índice da rede
+- `dealers_count` - Quantidade de lojas da rede
+
+### MoverProduto e MoverPromocao
+
+**Atributos:**
+- `transaction_uuid` - UUID único da transação
+- `uuid` - UUID (alias para facilitar busca)
+- `transaction_type` - Tipo: "mover_produto" ou "mover_promocao"
+- `last_transaction_uuid` - UUID da última transação processada
+
+**Eventos:**
+- `transaction.started` - Início da transação
+- `transaction.completed` - Transação concluída
+
+## 🛡️ Correções Aplicadas
+
+### Correção: Validação de JSON Vazio
+
+**Problema:** `ORA-20000: Erro: ORA-20000: JSON vazio` ao executar `pkg_integra_produto.prc_integra_hermes`
+
+**Solução:** Validação antecipada no repository e usecase antes de chamar a procedure Oracle.
+
+**Arquivos Modificados:**
+- `domain/repositories/productIntegrationRepo.go`
+- `domain/usecases/productIntegrationUseCase.go`
+
+### Correção: Nome das Colunas da Tabela REDE
+
+**Problema:** `ORA-00904: "REPLICAR_PRODUTO": invalid identifier`
+
+**Solução:** Todas as queries corrigidas para usar nomes sem underscore (padrão Oracle).
+
+**Arquivo Modificado:**
+- `domain/repositories/networkRepo.go`
+
+### Correção: Processamento de Produtos
+
+**Problema:** Código Go não estava chamando a procedure Oracle `pkg_integra_produto.prc_integra_hermes`
+
+**Solução:** Implementada chamada correta à procedure Oracle, igual ao código TypeScript.
+
+**Arquivo Modificado:**
+- `domain/usecases/productIntegrationUseCase.go`
+
+### Correções de Vazamento de Memória
+
+**Problemas Corrigidos:**
+1. ✅ Transação sem garantia de fechamento
+2. ✅ Array `success []bool` crescendo infinitamente
+3. ✅ Processamento sem batches
+4. ✅ Duplicação de JSON na memória
+5. ✅ Transação em ProductNetworkMain sem flag
+
+**Melhorias:**
+- Processamento em batches de 100 produtos
+- Uso de contadores ao invés de arrays
+- Transações sempre fechadas com pattern `committed := false` + defer
+- Eliminação de duplicação de JSON nos logs
+
+**Arquivos Modificados:**
+- `domain/usecases/productIntegrationUseCase.go`
+- `domain/usecases/integrationJobUseCase.go`
+
+### Correção: Timeout de Stored Procedures
+
+**Problema:** `ORA-01013: user requested cancel` - stored procedures sendo canceladas após 2 minutos
+
+**Solução:** Timeout aumentado de 120 segundos (2 minutos) para 600 segundos (10 minutos) em todas as funções de remoção de transação.
+
+**Arquivo Modificado:**
+- `domain/repositories/integrationRepo.go`
+
+### Correção: IDREDE Invalid Identifier
+
+**Problema:** `ORA-00904: "IDREDE": invalid identifier` na tabela `INTEGRACAOPRODUTOSTAGING`
+
+**Solução:** Removida condição `AND IDREDE = :1` da query, pois a tabela não possui essa coluna.
+
+**Arquivo Modificado:**
+- `domain/repositories/networkRepo.go`
+
+## 🔄 Fluxo de Processamento de Produtos
+
+### Fluxo Completo
+
+```
+Sistema Externo → INTEGRRMSPRODUTOIN (dados brutos)
+                    ↓
+Trigger/Job executa: pkg_integra_produto.prc_integra_hermes(IPR_ID)
+                    ↓
+Dados movidos para → INTEGRACAOPRODUTOSTAGING (JSON)
+                    ↓
+RabbitMQ mensagem "produto" → ImportProductIntegration (Go)
+                    ↓
+Lê registros da INTEGRACAOPRODUTOSTAGING
+                    ↓
+Para cada registro:
+  ├─ Parse JSON (validação)
+  ├─ Chama pkg_integra_produto.prc_integra_hermes(IdProduto)
+  ├─ Loga resultado (sucesso/falha)
+  └─ Remove da staging (sempre)
+                    ↓
+Produto integrado no sistema final → PRODUTO
 ```
 
 ## 🐛 Troubleshooting
@@ -264,6 +570,16 @@ make dev  # fmt + vet + test + build
 - Verifique se a fila `integracaoCron` existe
 - Confirme se há mensagens na fila
 - Verifique os logs para erros específicos
+
+### JSON Vazio
+- Verifique se há registros com JSON vazio na tabela `INTEGRRMSPRODUTOIN`
+- O sistema agora valida JSON antes de chamar a procedure Oracle
+- Logs mostrarão: "JSON vazio para IPR_ID X - não é possível processar"
+
+### Timeout em Stored Procedures
+- Stored procedures de limpeza agora têm timeout de 10 minutos
+- Se ainda ocorrer timeout, verifique o volume de dados
+- Considere otimizar a stored procedure no Oracle
 
 ## 📄 Licença
 
