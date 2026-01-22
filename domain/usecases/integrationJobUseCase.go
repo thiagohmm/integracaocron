@@ -88,7 +88,7 @@ func (uc *IntegrationJobUseCase) ProductNetworkMain(dataCorte time.Time) error {
 	}
 	tracing.AddEvent(ctx, "replicate_network.completed")
 
-	if err := uc.MoveDataJob(dataCorte); err != nil {
+	if err := uc.MoveDataJob(ctx, dataCorte); err != nil {
 		log.Printf("Erro no move data job: %v", err)
 		tracing.RecordError(ctx, err)
 		tracing.AddEvent(ctx, "move_data.failed", tracing.StringAttr("error", err.Error()))
@@ -426,7 +426,7 @@ func (uc *IntegrationJobUseCase) processLojasIndividually(lojas []entities.Deale
 
 // MoveDataJob moves data between staging tables
 // ✅ OTIMIZAÇÃO: Processar operações de movimentação em paralelo quando possível
-func (uc *IntegrationJobUseCase) MoveDataJob(dataCorte time.Time) error {
+func (uc *IntegrationJobUseCase) MoveDataJob(ctx context.Context, dataCorte time.Time) error {
 	log.Println("MoveDataJob - Início")
 
 	// Criar canal de erros para coletar erros das goroutines
@@ -443,7 +443,7 @@ func (uc *IntegrationJobUseCase) MoveDataJob(dataCorte time.Time) error {
 	}()
 	go func() {
 		defer wg.Done()
-		if err := uc.MoverProduto(); err != nil {
+		if err := uc.MoverProduto(ctx); err != nil {
 			errChan <- fmt.Errorf("erro ao mover produto: %w", err)
 		}
 	}()
@@ -461,7 +461,7 @@ func (uc *IntegrationJobUseCase) MoveDataJob(dataCorte time.Time) error {
 	}()
 	go func() {
 		defer wg.Done()
-		if err := uc.MoverPromocao(); err != nil {
+		if err := uc.MoverPromocao(ctx); err != nil {
 			errChan <- fmt.Errorf("erro ao mover promoção: %w", err)
 		}
 	}()
@@ -511,23 +511,56 @@ func (uc *IntegrationJobUseCase) MoverEstruturaMercadologica() error {
 	return nil
 }
 
-func (uc *IntegrationJobUseCase) MoverProduto() error {
+func (uc *IntegrationJobUseCase) MoverProduto(ctx context.Context) error {
 	log.Println("Movendo produtos - Início")
+
+	// Criar contexto com span para rastreamento (usar contexto pai se fornecido)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, span := tracing.StartSpan(ctx, "MoverProduto")
+	defer span.End()
 
 	for {
 		hasRecords, err := uc.integrationRepo.HasProductStaging()
 		if err != nil {
+			tracing.RecordError(ctx, err)
 			return fmt.Errorf("erro ao verificar staging produto: %w", err)
 		}
 		if !hasRecords {
 			break
 		}
 
+		// Criar span para cada iteração
+		iterCtx, iterSpan := tracing.StartSpan(ctx, "MoverProdutoIteration")
+		
 		// Criar nova data a cada iteração
 		dataAtualizada := time.Now()
-		if err := uc.integrationRepo.MoveIntegrationProductStaging(dataAtualizada); err != nil {
+		transactionUUID, err := uc.integrationRepo.MoveIntegrationProductStaging(iterCtx, dataAtualizada)
+		if err != nil {
+			tracing.RecordError(iterCtx, err)
+			iterSpan.End()
 			return fmt.Errorf("erro ao mover produto: %w", err)
 		}
+
+		// Log do UUID gerado
+		log.Printf("Transação produto processada com UUID: %s", transactionUUID)
+		
+		// Adicionar UUID ao span da iteração
+		tracing.AddStringAttribute(iterCtx, "transaction_uuid", transactionUUID)
+		tracing.AddEvent(iterCtx, "transaction.completed", tracing.StringAttr("transaction_uuid", transactionUUID))
+		
+		// Adicionar UUID ao contexto usando baggage para propagação
+		ctx = tracing.SetUUIDInContext(ctx, transactionUUID)
+		iterCtx = tracing.SetUUIDInContext(iterCtx, transactionUUID)
+		
+		// Adicionar UUID diretamente ao span principal para facilitar busca
+		tracing.AddStringAttribute(ctx, "transaction_uuid", transactionUUID)
+		tracing.AddStringAttribute(ctx, "uuid", transactionUUID)
+		tracing.AddStringAttribute(ctx, "last_transaction_uuid", transactionUUID)
+		tracing.AddEvent(ctx, "transaction.completed", tracing.StringAttr("transaction_uuid", transactionUUID))
+		
+		iterSpan.End()
 	}
 
 	log.Println("Movendo produtos - Fim")
@@ -580,23 +613,56 @@ func (uc *IntegrationJobUseCase) MoverCombo() error {
 	return nil
 }
 
-func (uc *IntegrationJobUseCase) MoverPromocao() error {
+func (uc *IntegrationJobUseCase) MoverPromocao(ctx context.Context) error {
 	log.Println("Movendo promoções - Início")
+
+	// Criar contexto com span para rastreamento (usar contexto pai se fornecido)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, span := tracing.StartSpan(ctx, "MoverPromocao")
+	defer span.End()
 
 	for {
 		hasRecords, err := uc.integrationRepo.HasPromotionStaging()
 		if err != nil {
+			tracing.RecordError(ctx, err)
 			return fmt.Errorf("erro ao verificar staging promoção: %w", err)
 		}
 		if !hasRecords {
 			break
 		}
 
+		// Criar span para cada iteração
+		iterCtx, iterSpan := tracing.StartSpan(ctx, "MoverPromocaoIteration")
+		
 		// Criar nova data a cada iteração
 		dataAtualizada := time.Now()
-		if err := uc.integrationRepo.MoveIntegrationPromotionStaging(dataAtualizada); err != nil {
+		transactionUUID, err := uc.integrationRepo.MoveIntegrationPromotionStaging(iterCtx, dataAtualizada)
+		if err != nil {
+			tracing.RecordError(iterCtx, err)
+			iterSpan.End()
 			return fmt.Errorf("erro ao mover promoção: %w", err)
 		}
+
+		// Log do UUID gerado
+		log.Printf("Transação promoção processada com UUID: %s", transactionUUID)
+		
+		// Adicionar UUID ao span da iteração
+		tracing.AddStringAttribute(iterCtx, "transaction_uuid", transactionUUID)
+		tracing.AddEvent(iterCtx, "transaction.completed", tracing.StringAttr("transaction_uuid", transactionUUID))
+		
+		// Adicionar UUID ao contexto usando baggage para propagação
+		ctx = tracing.SetUUIDInContext(ctx, transactionUUID)
+		iterCtx = tracing.SetUUIDInContext(iterCtx, transactionUUID)
+		
+		// Adicionar UUID diretamente ao span principal para facilitar busca
+		tracing.AddStringAttribute(ctx, "transaction_uuid", transactionUUID)
+		tracing.AddStringAttribute(ctx, "uuid", transactionUUID)
+		tracing.AddStringAttribute(ctx, "last_transaction_uuid", transactionUUID)
+		tracing.AddEvent(ctx, "transaction.completed", tracing.StringAttr("transaction_uuid", transactionUUID))
+		
+		iterSpan.End()
 	}
 
 	log.Println("Movendo promoções - Fim")

@@ -1,6 +1,9 @@
 package entities
 
-import "time"
+import (
+	"context"
+	"time"
+)
 
 // ProductIntegrationRepository handles product integration database operations
 type ProductIntegrationRepository interface {
@@ -99,10 +102,12 @@ type IntegrationRepository interface {
 	HasComboStaging() (bool, error)
 	HasPromotionStaging() (bool, error)
 	MoveIntegrationMarketingStructure(dataCorte time.Time) error
-	MoveIntegrationProductStaging(dataCorte time.Time) error
+	MoveIntegrationProductStaging(ctx context.Context, dataCorte time.Time) (string, error)
 	MoveIntegrationPackagingStaging(dataCorte time.Time) error
 	MoveIntegrationComboStaging(dataCorte time.Time) error
-	MoveIntegrationPromotionStaging(dataCorte time.Time) error
+	MoveIntegrationPromotionStaging(ctx context.Context, dataCorte time.Time) (string, error)
+	SetRabbitMQURL(url string)
+	SendToQueue(message QueueMessage) error
 	GetIntegrationUpdateComboByDate(dataCorte time.Time) ([]IntegrationCombo, error)
 	DeleteIntegrationCombo(idIntegracaoCombo int) error
 	UpdateExpiredSlaSolicitation() error

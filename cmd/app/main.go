@@ -79,6 +79,7 @@ func main() {
 	// ✅ Configure RabbitMQ URL for repositories that need it
 	productIntegrationRepo.SetRabbitMQURL(rabbitmqURL)
 	promotionNormalizationRepo.SetRabbitMQURL(rabbitmqURL)
+	integrationRepo.SetRabbitMQURL(rabbitmqURL)
 
 	// Initialize use cases
 	packagingIntegrationUC := usecases.NewPackagingIntegrationUseCase(productRepo, productPackagingRepo, unitOfMeasurementRepo, packagingIntegrationStagingRepo)

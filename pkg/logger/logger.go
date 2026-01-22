@@ -22,10 +22,15 @@ func New() *Logger {
 func (l *Logger) logWithTrace(ctx context.Context, level, message string, args ...interface{}) {
 	traceID := tracing.GetTraceID(ctx)
 	spanID := tracing.GetSpanID(ctx)
+	uuid := tracing.GetUUIDFromContext(ctx)
 	
 	prefix := fmt.Sprintf("[%s]", level)
 	if traceID != "" {
-		prefix = fmt.Sprintf("[%s][trace:%s][span:%s]", level, traceID[:8], spanID[:8])
+		if uuid != "" {
+			prefix = fmt.Sprintf("[%s][trace:%s][span:%s][uuid:%s]", level, traceID[:8], spanID[:8], uuid)
+		} else {
+			prefix = fmt.Sprintf("[%s][trace:%s][span:%s]", level, traceID[:8], spanID[:8])
+		}
 	}
 	
 	fullMessage := fmt.Sprintf(message, args...)

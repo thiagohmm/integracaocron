@@ -494,7 +494,12 @@ func (l *Listener) productNetworkMain(dataCorte time.Time) error {
 	}
 
 	// Mover dados usando o dataCorte fornecido
-	if err := l.IntegrationUc.MoveDataJob(dataCorte); err != nil {
+	// Criar contexto para propagar UUID
+	moveCtx := context.Background()
+	moveCtx, moveSpan := tracing.StartSpan(moveCtx, "MoveDataJob")
+	defer moveSpan.End()
+	
+	if err := l.IntegrationUc.MoveDataJob(moveCtx, dataCorte); err != nil {
 		log.Printf("Erro ao mover dados: %v", err)
 		return fmt.Errorf("erro ao mover dados: %w", err)
 	}

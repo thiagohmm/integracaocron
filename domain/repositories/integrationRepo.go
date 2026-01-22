@@ -2,18 +2,26 @@ package repositories
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
+	"github.com/streadway/amqp"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"github.com/thiagohmm/integracaocron/domain/entities"
+	"github.com/thiagohmm/integracaocron/infraestructure/rabbitmq"
 )
 
 // IntegrationRepositoryImpl implements the IntegrationRepository interface
 type IntegrationRepositoryImpl struct {
-	db *sql.DB
+	db          *sql.DB
+	rabbitmqURL string
 }
 
 // NewIntegrationRepository creates a new instance of IntegrationRepository
@@ -21,6 +29,91 @@ func NewIntegrationRepository(db *sql.DB) entities.IntegrationRepository {
 	return &IntegrationRepositoryImpl{
 		db: db,
 	}
+}
+
+// SetRabbitMQURL sets the RabbitMQ URL for sending messages
+func (r *IntegrationRepositoryImpl) SetRabbitMQURL(url string) {
+	r.rabbitmqURL = url
+}
+
+// generateUUID generates a UUID v4
+func generateUUID() string {
+	uuid := make([]byte, 16)
+	rand.Read(uuid)
+	// Set version (4) and variant bits
+	uuid[6] = (uuid[6] & 0x0f) | 0x40
+	uuid[8] = (uuid[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%s-%s-%s-%s-%s",
+		hex.EncodeToString(uuid[0:4]),
+		hex.EncodeToString(uuid[4:6]),
+		hex.EncodeToString(uuid[6:8]),
+		hex.EncodeToString(uuid[8:10]),
+		hex.EncodeToString(uuid[10:16]))
+}
+
+// SendToQueue sends a message to RabbitMQ queue
+func (r *IntegrationRepositoryImpl) SendToQueue(message entities.QueueMessage) error {
+	if r.rabbitmqURL == "" {
+		// Fallback: log if RabbitMQ URL is not configured
+		messageJSON, _ := json.Marshal(message)
+		log.Printf("RabbitMQ URL not configured, logging message: %s", string(messageJSON))
+		return nil
+	}
+
+	// Get RabbitMQ connection
+	conn, err := rabbitmq.GetRabbitMQConnection(r.rabbitmqURL)
+	if err != nil {
+		log.Printf("Erro ao conectar ao RabbitMQ: %v", err)
+		return err
+	}
+
+	// Create channel
+	ch, err := conn.Channel()
+	if err != nil {
+		log.Printf("Erro ao criar canal RabbitMQ: %v", err)
+		return err
+	}
+	defer ch.Close()
+
+	// Convert message to JSON
+	body, err := json.Marshal(message)
+	if err != nil {
+		log.Printf("Erro ao converter mensagem para JSON: %v", err)
+		return err
+	}
+
+	// Declare queue (ensure it exists)
+	queueName := "log"
+	_, err = ch.QueueDeclare(
+		queueName, // name
+		true,      // durable
+		false,     // delete when unused
+		false,     // exclusive
+		false,     // no-wait
+		nil,       // arguments
+	)
+	if err != nil {
+		log.Printf("Erro ao declarar fila: %v", err)
+		return err
+	}
+
+	// Publish message
+	err = ch.Publish(
+		"",        // exchange
+		queueName, // routing key
+		false,     // mandatory
+		false,     // immediate
+		amqp.Publishing{
+			ContentType: "application/json",
+			Body:        body,
+		})
+
+	if err != nil {
+		log.Printf("Erro ao enviar mensagem para fila: %v", err)
+		return err
+	}
+
+	return nil
 }
 
 // Transaction removal methods
@@ -350,20 +443,60 @@ func (r *IntegrationRepositoryImpl) MoveIntegrationMarketingStructure(dataCorte 
 	return nil
 }
 
-func (r *IntegrationRepositoryImpl) MoveIntegrationProductStaging(dataCorte time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+func (r *IntegrationRepositoryImpl) MoveIntegrationProductStaging(ctx context.Context, dataCorte time.Time) (string, error) {
+	// Gerar UUID para esta transação
+	transactionUUID := generateUUID()
+
+	// Adicionar UUID ao contexto do Jaeger
+	span := trace.SpanFromContext(ctx)
+	if span != nil {
+		span.SetAttributes(
+			attribute.String("transaction_uuid", transactionUUID),
+			attribute.String("transaction_type", "mover_produto"),
+			attribute.String("uuid", transactionUUID), // Adicionar também como "uuid" para facilitar busca
+		)
+		// Adicionar evento com UUID para facilitar busca no Jaeger
+		span.AddEvent("transaction.started", trace.WithAttributes(
+			attribute.String("transaction_uuid", transactionUUID),
+			attribute.String("transaction_type", "mover_produto"),
+		))
+	}
+
+	// Criar contexto com timeout para a query
+	queryCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	query := `BEGIN sp_MoverStagingProduto(:1); END;`
 
-	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	_, err := r.db.ExecContext(queryCtx, query, dataCorte)
 	if err != nil {
 		log.Printf("Erro ao executar sp_MoverStagingProduto: %v", err)
-		return fmt.Errorf("erro ao mover produto para staging: %w", err)
+		return transactionUUID, fmt.Errorf("erro ao mover produto para staging: %w", err)
 	}
 
-	log.Printf("Produto movido para staging com sucesso para data: %v", dataCorte)
-	return nil
+	log.Printf("Produto movido para staging com sucesso para data: %v, UUID: %s", dataCorte, transactionUUID)
+
+	// Enviar UUID para a fila log
+	logMessage := entities.QueueMessage{
+		Tabela: "LogsIntegrRMS",
+		Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
+		Values: []interface{}{
+			transactionUUID,
+			"PRODUTOS",
+			dataCorte,
+			time.Now(),
+			0, // 0 = sucesso
+			fmt.Sprintf(`{"transaction_uuid":"%s","transaction_type":"mover_produto","data_corte":"%s"}`, transactionUUID, dataCorte.Format(time.RFC3339)),
+			fmt.Sprintf("Produto movido para staging com sucesso - UUID: %s", transactionUUID),
+		},
+	}
+
+	if err := r.SendToQueue(logMessage); err != nil {
+		log.Printf("Erro ao enviar UUID para fila log: %v", err)
+		// Não retornar erro aqui, apenas logar
+	}
+
+	return transactionUUID, nil
 }
 
 func (r *IntegrationRepositoryImpl) MoveIntegrationPackagingStaging(dataCorte time.Time) error {
@@ -398,20 +531,60 @@ func (r *IntegrationRepositoryImpl) MoveIntegrationComboStaging(dataCorte time.T
 	return nil
 }
 
-func (r *IntegrationRepositoryImpl) MoveIntegrationPromotionStaging(dataCorte time.Time) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+func (r *IntegrationRepositoryImpl) MoveIntegrationPromotionStaging(ctx context.Context, dataCorte time.Time) (string, error) {
+	// Gerar UUID para esta transação
+	transactionUUID := generateUUID()
+
+	// Adicionar UUID ao contexto do Jaeger
+	span := trace.SpanFromContext(ctx)
+	if span != nil {
+		span.SetAttributes(
+			attribute.String("transaction_uuid", transactionUUID),
+			attribute.String("transaction_type", "mover_promocao"),
+			attribute.String("uuid", transactionUUID), // Adicionar também como "uuid" para facilitar busca
+		)
+		// Adicionar evento com UUID para facilitar busca no Jaeger
+		span.AddEvent("transaction.started", trace.WithAttributes(
+			attribute.String("transaction_uuid", transactionUUID),
+			attribute.String("transaction_type", "mover_promocao"),
+		))
+	}
+
+	// Criar contexto com timeout para a query
+	queryCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	query := `BEGIN sp_MoverStagingPromocao(:1); END;`
 
-	_, err := r.db.ExecContext(ctx, query, dataCorte)
+	_, err := r.db.ExecContext(queryCtx, query, dataCorte)
 	if err != nil {
 		log.Printf("Erro ao executar sp_MoverStagingPromocao: %v", err)
-		return fmt.Errorf("erro ao mover promoção para staging: %w", err)
+		return transactionUUID, fmt.Errorf("erro ao mover promoção para staging: %w", err)
 	}
 
-	log.Printf("Promoção movida para staging com sucesso para data: %v", dataCorte)
-	return nil
+	log.Printf("Promoção movida para staging com sucesso para data: %v, UUID: %s", dataCorte, transactionUUID)
+
+	// Enviar UUID para a fila log
+	logMessage := entities.QueueMessage{
+		Tabela: "LogsIntegrRMS",
+		Fields: []string{"TRANSACAO", "TABELA", "DATARECEBIMENTO", "DATAPROCESSAMENTO", "STATUSPROCESSAMENTO", "JSON", "DESCRICAOERRO"},
+		Values: []interface{}{
+			transactionUUID,
+			"PROMOCOES",
+			dataCorte,
+			time.Now(),
+			0, // 0 = sucesso
+			fmt.Sprintf(`{"transaction_uuid":"%s","transaction_type":"mover_promocao","data_corte":"%s"}`, transactionUUID, dataCorte.Format(time.RFC3339)),
+			fmt.Sprintf("Promoção movida para staging com sucesso - UUID: %s", transactionUUID),
+		},
+	}
+
+	if err := r.SendToQueue(logMessage); err != nil {
+		log.Printf("Erro ao enviar UUID para fila log: %v", err)
+		// Não retornar erro aqui, apenas logar
+	}
+
+	return transactionUUID, nil
 }
 
 // Expiry methods

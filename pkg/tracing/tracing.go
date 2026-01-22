@@ -7,6 +7,7 @@ import (
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/baggage"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/exporters/jaeger"
 	"go.opentelemetry.io/otel/propagation"
@@ -310,4 +311,35 @@ func InjectContext(ctx context.Context, carrier propagation.TextMapCarrier) {
 // ExtractContext extracts the tracing context from a carrier
 func ExtractContext(ctx context.Context, carrier propagation.TextMapCarrier) context.Context {
 	return otel.GetTextMapPropagator().Extract(ctx, carrier)
+}
+
+// GetUUIDFromContext tries to get UUID from span attributes or baggage
+func GetUUIDFromContext(ctx context.Context) string {
+	// Try to get from baggage first
+	bag := baggage.FromContext(ctx)
+	if bag.Len() > 0 {
+		// Iterate through baggage members to find transaction_uuid
+		for _, member := range bag.Members() {
+			if member.Key() == "transaction_uuid" {
+				return member.Value()
+			}
+		}
+	}
+	
+	// Note: Direct access to span attributes is not easily available
+	// The UUID should be set via baggage for easy access
+	return ""
+}
+
+// SetUUIDInContext sets UUID in context using baggage for easy propagation
+func SetUUIDInContext(ctx context.Context, uuid string) context.Context {
+	member, err := baggage.NewMember("transaction_uuid", uuid)
+	if err != nil {
+		return ctx
+	}
+	bag, err := baggage.New(member)
+	if err != nil {
+		return ctx
+	}
+	return baggage.ContextWithBaggage(ctx, bag)
 }
