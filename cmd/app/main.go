@@ -115,7 +115,7 @@ func main() {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			httpServer := rabbitmq.NewHTTPServer(httpPort, listener)
+			httpServer := rabbitmq.NewHTTPServer(httpPort, listener, db, rabbitmqURL)
 			logger.Info(ctx, "Iniciando servidor HTTP na porta %s", httpPort)
 			if err := httpServer.Start(); err != nil {
 				logger.Error(ctx, "Erro no servidor HTTP: %v", err)
@@ -181,15 +181,32 @@ func getRabbitMQURL(cfg *configuration.Conf) string {
 }
 
 // getHTTPPort gets HTTP port from environment or config
+// Priority: PORT env var > HTTP_PORT env var > PORT from config > HTTP_PORT from config > default "8080"
 func getHTTPPort(cfg *configuration.Conf) string {
-	httpPort := os.Getenv("HTTP_PORT")
-	if httpPort == "" {
-		httpPort = cfg.HTTPPort
+	// First priority: PORT environment variable
+	httpPort := os.Getenv("PORT")
+	if httpPort != "" {
+		return httpPort
 	}
-	if httpPort == "" {
-		httpPort = "8080" // Default port
+
+	// Second priority: HTTP_PORT environment variable (backward compatibility)
+	httpPort = os.Getenv("HTTP_PORT")
+	if httpPort != "" {
+		return httpPort
 	}
-	return httpPort
+
+	// Third priority: PORT from config file
+	if cfg.HTTPPort != "" {
+		return cfg.HTTPPort
+	}
+
+	// Fourth priority: HTTP_PORT from config file (backward compatibility)
+	if cfg.HTTPPortLegacy != "" {
+		return cfg.HTTPPortLegacy
+	}
+
+	// Default fallback
+	return "8080"
 }
 
 // getWorkersCount gets the number of workers from environment or uses default
